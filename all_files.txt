@@ -1,0 +1,3801 @@
+Cale: vendor/endroid//installer/LICENSE
+Nume: LICENSE
+Continut:
+Copyright 2024 (c) Jeroen van den Enden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+-------------------------------------
+Cale: vendor/endroid//installer/README.md
+Nume: README.md
+Continut:
+# Installer
+
+*By [endroid](https://endroid.nl/)*
+
+[![Latest Stable Version](http://img.shields.io/packagist/v/endroid/installer.svg)](https://packagist.org/packages/endroid/installer)
+[![Build Status](https://github.com/endroid/installer/workflows/CI/badge.svg)](https://github.com/endroid/installer/actions)
+[![Total Downloads](http://img.shields.io/packagist/dt/endroid/installer.svg)](https://packagist.org/packages/endroid/installer)
+[![Monthly Downloads](http://img.shields.io/packagist/dm/endroid/installer.svg)](https://packagist.org/packages/endroid/installer)
+[![License](http://img.shields.io/packagist/l/endroid/installer.svg)](https://packagist.org/packages/endroid/installer)
+
+Composer plugin for installing configuration files. The installer automatically
+detects the project type in which your library is installed and installs the
+corresponding configuration files from your package.
+
+Read the [blog](https://medium.com/@endroid/auto-package-configuration-for-symfony-e14780e29d81)
+for more information on why I created this plugin.
+
+## Installation
+
+``` bash
+composer config allow-plugins.endroid/installer true
+composer require endroid/installer
+```
+
+## Usage
+
+Add the configuration files you want to be copied upon installation and update
+of the package to the .install directory in the root of your package. The files
+will be copied to the corresponding directories in the project.
+
+```
+.install
+    symfony
+        config
+            packages
+                package_name.yaml
+            routes
+                package_name.yaml
+```
+
+Please note that the installer will only copy files that are not yet present in
+the project to make sure user made changes will not be overwritten. If you want
+the latest default configuration just remove the files locally before update.
+
+## Disabling auto installation for a package
+
+Generally you want the files to be installed automatically but if you
+experience issues with the installer or just don't want some package to be
+auto installed you can specify this via your composer.json.
+
+```
+"extra": {
+    "endroid": {
+        "installer": {
+            "enabled": false,
+            "exclude": [
+                "endroid/asset",
+                "endroid/embed"
+            ]
+        }
+    }
+}
+```
+
+## Versioning
+
+Version numbers follow the MAJOR.MINOR.PATCH scheme. Backwards compatible
+changes will be kept to a minimum but be aware that these can occur. Lock
+your dependencies for production and test your code when upgrading.
+
+## License
+
+This bundle is under the MIT license. For the full copyright and license
+information please view the LICENSE file that was distributed with this source code.
+
+-------------------------------------
+Cale: vendor/endroid//installer/composer.json
+Nume: composer.json
+Continut:
+{
+    "name": "endroid/installer",
+    "type": "composer-plugin",
+    "description": "Composer plugin for installing configuration files",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jeroen van den Enden",
+            "email": "info@endroid.nl"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "composer-plugin-api": "^2.0"
+    },
+    "require-dev": {
+        "composer/composer": "^2.0",
+        "endroid/quality": "dev-main"
+    },
+    "suggest": {
+        "roave/security-advisories": "Avoids installation of package versions with vulnerabilities"
+    },
+    "autoload": {
+        "psr-4": {
+            "Endroid\\Installer\\": "src"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        },
+        "class": "Endroid\\Installer\\Installer"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "endroid/installer": true
+        }
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//installer/src/Installer.php
+Nume: Installer.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\Installer;
+
+use Composer\Composer;
+use Composer\EventDispatcher\EventSubscriberInterface;
+use Composer\IO\IOInterface;
+use Composer\Plugin\PluginInterface;
+use Composer\Script\ScriptEvents;
+
+final class Installer implements PluginInterface, EventSubscriberInterface
+{
+    private const PROJECT_TYPE_ALL = 'all';
+
+    private Composer $composer;
+    private IOInterface $io;
+
+    /** @var array<string, array<string>> */
+    private array $projectTypes = [
+        self::PROJECT_TYPE_ALL => [],
+        'symfony' => [
+            'config/packages',
+            'public',
+        ],
+    ];
+
+    public function activate(Composer $composer, IOInterface $io): void
+    {
+        $this->composer = $composer;
+        $this->io = $io;
+    }
+
+    public function deactivate(Composer $composer, IOInterface $io): void
+    {
+    }
+
+    public function uninstall(Composer $composer, IOInterface $io): void
+    {
+    }
+
+    public static function getSubscribedEvents(): array
+    {
+        return [
+            ScriptEvents::POST_INSTALL_CMD => ['install', 1],
+            ScriptEvents::POST_UPDATE_CMD => ['install', 1],
+        ];
+    }
+
+    public function install(): void
+    {
+        $foundCompatibleProjectType = false;
+        foreach ($this->projectTypes as $projectType => $paths) {
+            if ($this->isCompatibleProjectType($paths)) {
+                if (self::PROJECT_TYPE_ALL !== $projectType) {
+                    $this->io->write('<info>Endroid Installer detected project type "'.$projectType.'"</>');
+                    $foundCompatibleProjectType = true;
+                }
+                $this->installProjectType($projectType);
+            }
+        }
+
+        if (!$foundCompatibleProjectType) {
+            $this->io->write('<info>Endroid Installer did not detect a specific framework for auto-configuration</>');
+        }
+    }
+
+    /** @param array<string> $paths */
+    private function isCompatibleProjectType(array $paths): bool
+    {
+        foreach ($paths as $path) {
+            if (!file_exists(getcwd().DIRECTORY_SEPARATOR.$path)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function installProjectType(string $projectType): void
+    {
+        $exclude = $this->composer->getPackage()->getExtra()['endroid']['installer']['exclude'] ?? [];
+
+        $processedPackages = [];
+        $packages = $this->composer->getRepositoryManager()->getLocalRepository()->getPackages();
+
+        foreach ($packages as $package) {
+            // Avoid handling duplicates: getPackages sometimes returns duplicates
+            if (in_array($package->getName(), $processedPackages)) {
+                continue;
+            }
+            $processedPackages[] = $package->getName();
+
+            // Skip excluded packages
+            if (in_array($package->getName(), $exclude)) {
+                $this->io->write('- Skipping <info>'.$package->getName().'</>');
+                continue;
+            }
+
+            // Check for installation files and install
+            $packagePath = $this->composer->getInstallationManager()->getInstallPath($package);
+            $sourcePath = $packagePath.DIRECTORY_SEPARATOR.'.install'.DIRECTORY_SEPARATOR.$projectType;
+            if (file_exists($sourcePath)) {
+                $changed = $this->copy($sourcePath, (string) getcwd());
+                if ($changed) {
+                    $this->io->write('- Configured <info>'.$package->getName().'</>');
+                }
+            }
+        }
+    }
+
+    private function copy(string $sourcePath, string $targetPath): bool
+    {
+        $changed = false;
+
+        /** @var \RecursiveDirectoryIterator $iterator */
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourcePath, \RecursiveDirectoryIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
+
+        /** @var \SplFileInfo $fileInfo */
+        foreach ($iterator as $fileInfo) {
+            $target = $targetPath.DIRECTORY_SEPARATOR.$iterator->getSubPathName();
+            if ($fileInfo->isDir()) {
+                if (!is_dir($target)) {
+                    mkdir($target);
+                }
+            } elseif (!file_exists($target)) {
+                $this->copyFile($fileInfo->getPathname(), $target);
+                $changed = true;
+            }
+        }
+
+        return $changed;
+    }
+
+    public function copyFile(string $source, string $target): void
+    {
+        if (file_exists($target)) {
+            return;
+        }
+
+        copy($source, $target);
+        @chmod($target, fileperms($target) | (fileperms($source) & 0111));
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/LICENSE
+Nume: LICENSE
+Continut:
+Copyright 2024 (c) Jeroen van den Enden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/README.md
+Nume: README.md
+Continut:
+# QR Code
+
+*By [endroid](https://endroid.nl/)*
+
+[![Latest Stable Version](http://img.shields.io/packagist/v/endroid/qr-code.svg)](https://packagist.org/packages/endroid/qr-code)
+[![Build Status](https://github.com/endroid/qr-code/workflows/CI/badge.svg)](https://github.com/endroid/qr-code/actions)
+[![Total Downloads](http://img.shields.io/packagist/dt/endroid/qr-code.svg)](https://packagist.org/packages/endroid/qr-code)
+[![Monthly Downloads](http://img.shields.io/packagist/dm/endroid/qr-code.svg)](https://packagist.org/packages/endroid/qr-code)
+[![License](http://img.shields.io/packagist/l/endroid/qr-code.svg)](https://packagist.org/packages/endroid/qr-code)
+
+This library helps you generate QR codes in a jiffy. Makes use of [bacon/bacon-qr-code](https://github.com/Bacon/BaconQrCode)
+to generate the matrix and [khanamiryan/qrcode-detector-decoder](https://github.com/khanamiryan/php-qrcode-detector-decoder)
+for validating generated QR codes. Further extended with Twig extensions, generation routes, a factory and a
+Symfony bundle for easy installation and configuration. Different writers are provided to generate the QR code
+as PNG, SVG, EPS or in binary format.
+
+## Sponsored by
+
+[![Blackfire.io](.github/blackfire.png)](https://www.blackfire.io)
+
+## Installation
+
+Use [Composer](https://getcomposer.org/) to install the library. Also make sure you have enabled and configured the
+[GD extension](https://www.php.net/manual/en/book.image.php) if you want to generate images.
+
+``` bash
+ composer require endroid/qr-code
+```
+
+## Usage: using the builder
+
+```php
+use Endroid\QrCode\Builder\Builder;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\Label\LabelAlignment;
+use Endroid\QrCode\Label\Font\OpenSans;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\PngWriter;
+
+$builder = new Builder(
+    writer: new PngWriter(),
+    writerOptions: [],
+    validateResult: false,
+    data: 'Custom QR code contents',
+    encoding: new Encoding('UTF-8'),
+    errorCorrectionLevel: ErrorCorrectionLevel::High,
+    size: 300,
+    margin: 10,
+    roundBlockSizeMode: RoundBlockSizeMode::Margin,
+    logoPath: __DIR__.'/assets/symfony.png',
+    logoResizeToWidth: 50,
+    logoPunchoutBackground: true,
+    labelText: 'This is the label',
+    labelFont: new OpenSans(20),
+    labelAlignment: LabelAlignment::Center
+);
+
+$result = $builder->build();
+```
+
+## Usage: without using the builder
+
+```php
+use Endroid\QrCode\Color\Color;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Label\Label;
+use Endroid\QrCode\Logo\Logo;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\PngWriter;
+use Endroid\QrCode\Writer\ValidationException;
+
+$writer = new PngWriter();
+
+// Create QR code
+$qrCode = new QrCode(
+    data: 'Life is too short to be generating QR codes',
+    encoding: new Encoding('UTF-8'),
+    errorCorrectionLevel: ErrorCorrectionLevel::Low,
+    size: 300,
+    margin: 10,
+    roundBlockSizeMode: RoundBlockSizeMode::Margin,
+    foregroundColor: new Color(0, 0, 0),
+    backgroundColor: new Color(255, 255, 255)
+);
+
+// Create generic logo
+$logo = new Logo(
+    path: __DIR__.'/assets/symfony.png',
+    resizeToWidth: 50,
+    punchoutBackground: true
+);
+
+// Create generic label
+$label = new Label(
+    text: 'Label',
+    textColor: new Color(255, 0, 0)
+);
+
+$result = $writer->write($qrCode, $logo, $label);
+
+// Validate the result
+$writer->validateResult($result, 'Life is too short to be generating QR codes');
+```
+
+## Usage: working with results
+
+```php
+
+// Directly output the QR code
+header('Content-Type: '.$result->getMimeType());
+echo $result->getString();
+
+// Save it to a file
+$result->saveToFile(__DIR__.'/qrcode.png');
+
+// Generate a data URI to include image data inline (i.e. inside an <img> tag)
+$dataUri = $result->getDataUri();
+```
+
+![QR Code](.github/example.png)
+
+### Writer options
+
+Some writers provide writer options. Each available writer option is can be
+found as a constant prefixed with WRITER_OPTION_ in the writer class.
+
+* `PdfWriter`
+  * `unit`: unit of measurement (default: mm)
+  * `fpdf`: PDF to place the image in (default: new PDF)
+  * `x`: image offset (default: 0)
+  * `y`: image offset (default: 0)
+  * `link`: a URL or an identifier returned by `AddLink()`.
+* `PngWriter`
+  * `compression_level`: compression level (0-9, default: -1 = zlib default)
+* `SvgWriter`
+  * `block_id`: id of the block element for external reference (default: block)
+  * `exclude_xml_declaration`: exclude XML declaration (default: false)
+  * `exclude_svg_width_and_height`: exclude width and height (default: false)
+  * `force_xlink_href`: forces xlink namespace in case of compatibility issues (default: false)
+  * `compact`: create using `path` element, otherwise use `defs` and `use` (default: true)
+* `WebPWriter`
+  * `quality`: image quality (0-100, default: 80)
+
+You can provide any writer options like this.
+
+```php
+use Endroid\QrCode\Writer\SvgWriter;
+
+$builder = new Builder(
+    writer: new SvgWriter(),
+    writerOptions: [
+        SvgWriter::WRITER_OPTION_EXCLUDE_XML_DECLARATION => true
+    ]
+);
+```
+
+### Encoding
+
+If you use a barcode scanner you can have some troubles while reading the
+generated QR codes. Depending on the encoding you chose you will have an extra
+amount of data corresponding to the ECI block. Some barcode scanner are not
+programmed to interpret this block of information. To ensure a maximum
+compatibility you can use the `ISO-8859-1` encoding that is the default
+encoding used by barcode scanners (if your character set supports it,
+i.e. no Chinese characters are present).
+
+### Round block size mode
+
+By default block sizes are rounded to guarantee sharp images and improve
+readability. However some other rounding variants are available.
+
+* `margin (default)`: the size of the QR code is shrunk if necessary but the size
+  of the final image remains unchanged due to additional margin being added.
+* `enlarge`: the size of the QR code and the final image are enlarged when
+  rounding differences occur.
+* `shrink`: the size of the QR code and the final image are
+  shrunk when rounding differences occur.
+* `none`: No rounding. This mode can be used when blocks don't need to be rounded
+  to pixels (for instance SVG).
+
+## Readability
+
+The readability of a QR code is primarily determined by the size, the input
+length, the error correction level and any possible logo over the image so you
+can tweak these parameters if you are looking for optimal results. You can also
+check $qrCode->getRoundBlockSize() value to see if block dimensions are rounded
+so that the image is more sharp and readable. Please note that rounding block
+size can result in additional padding to compensate for the rounding difference.
+And finally the encoding (default UTF-8 to support large character sets) can be
+set to `ISO-8859-1` if possible to improve readability.
+
+## Validating the generated QR code
+
+If you need to be extra sure the QR code you generated is readable and contains
+the exact data you requested you can enable the validation reader, which is
+disabled by default. You can do this either via the builder or directly on any
+writer that supports validation. See the examples above.
+
+Please note that validation affects performance so only use it in case of problems.
+
+## Symfony integration
+
+The [endroid/qr-code-bundle](https://github.com/endroid/qr-code-bundle)
+integrates the QR code library in Symfony for an even better experience.
+
+* Configure your defaults (like image size, default writer etc.)
+* Support for multiple configurations and injection via aliases
+* Generate QR codes for defined configurations via URL like /qr-code/<config>/Hello
+* Generate QR codes or URLs directly from Twig using dedicated functions
+
+Read the [bundle documentation](https://github.com/endroid/qr-code-bundle)
+for more information.
+
+## Versioning
+
+Version numbers follow the MAJOR.MINOR.PATCH scheme. Backwards compatibility
+breaking changes will be kept to a minimum but be aware that these can occur.
+Lock your dependencies for production and test your code when upgrading.
+
+## License
+
+This bundle is under the MIT license. For the full copyright and license
+information please view the LICENSE file that was distributed with this source code.
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/composer.json
+Nume: composer.json
+Continut:
+{
+    "name": "endroid/qr-code",
+    "description": "Endroid QR Code",
+    "keywords": ["endroid", "qrcode", "qr", "code", "php"],
+    "homepage": "https://github.com/endroid/qr-code",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jeroen van den Enden",
+            "email": "info@endroid.nl"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "bacon/bacon-qr-code": "^3.0"
+    },
+    "require-dev": {
+        "ext-gd": "*",
+        "endroid/quality": "dev-main",
+        "khanamiryan/qrcode-detector-decoder": "^2.0.2",
+        "setasign/fpdf": "^1.8.2"
+    },
+    "suggest": {
+        "ext-gd": "Enables you to write PNG images",
+        "khanamiryan/qrcode-detector-decoder": "Enables you to use the image validator",
+        "roave/security-advisories": "Makes sure package versions with known security issues are not installed",
+        "setasign/fpdf": "Enables you to use the PDF writer"
+    },
+    "autoload": {
+        "psr-4": {
+            "Endroid\\QrCode\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Endroid\\QrCode\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": {
+            "endroid/*": "source"
+        },
+        "allow-plugins": {
+            "endroid/installer": true
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "6.x-dev"
+        }
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Bacon/ErrorCorrectionLevelConverter.php
+Nume: ErrorCorrectionLevelConverter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Bacon;
+
+use BaconQrCode\Common\ErrorCorrectionLevel as BaconErrorCorrectionLevel;
+use Endroid\QrCode\ErrorCorrectionLevel;
+
+final readonly class ErrorCorrectionLevelConverter
+{
+    public static function convertToBaconErrorCorrectionLevel(ErrorCorrectionLevel $errorCorrectionLevel): BaconErrorCorrectionLevel
+    {
+        return match ($errorCorrectionLevel) {
+            ErrorCorrectionLevel::Low => BaconErrorCorrectionLevel::valueOf('L'),
+            ErrorCorrectionLevel::Medium => BaconErrorCorrectionLevel::valueOf('M'),
+            ErrorCorrectionLevel::Quartile => BaconErrorCorrectionLevel::valueOf('Q'),
+            ErrorCorrectionLevel::High => BaconErrorCorrectionLevel::valueOf('H'),
+        };
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Bacon/MatrixFactory.php
+Nume: MatrixFactory.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Bacon;
+
+use BaconQrCode\Encoder\Encoder;
+use Endroid\QrCode\Matrix\Matrix;
+use Endroid\QrCode\Matrix\MatrixFactoryInterface;
+use Endroid\QrCode\Matrix\MatrixInterface;
+use Endroid\QrCode\QrCodeInterface;
+
+final readonly class MatrixFactory implements MatrixFactoryInterface
+{
+    public function create(QrCodeInterface $qrCode): MatrixInterface
+    {
+        $baconErrorCorrectionLevel = ErrorCorrectionLevelConverter::convertToBaconErrorCorrectionLevel($qrCode->getErrorCorrectionLevel());
+        $baconMatrix = Encoder::encode($qrCode->getData(), $baconErrorCorrectionLevel, strval($qrCode->getEncoding()))->getMatrix();
+
+        $blockValues = [];
+        $columnCount = $baconMatrix->getWidth();
+        $rowCount = $baconMatrix->getHeight();
+        for ($rowIndex = 0; $rowIndex < $rowCount; ++$rowIndex) {
+            $blockValues[$rowIndex] = [];
+            for ($columnIndex = 0; $columnIndex < $columnCount; ++$columnIndex) {
+                $blockValues[$rowIndex][$columnIndex] = $baconMatrix->get($columnIndex, $rowIndex);
+            }
+        }
+
+        return new Matrix($blockValues, $qrCode->getSize(), $qrCode->getMargin(), $qrCode->getRoundBlockSizeMode());
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Builder/Builder.php
+Nume: Builder.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Builder;
+
+use Endroid\QrCode\Color\Color;
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\Encoding\EncodingInterface;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\Exception\ValidationException;
+use Endroid\QrCode\Label\Font\Font;
+use Endroid\QrCode\Label\Font\FontInterface;
+use Endroid\QrCode\Label\Label;
+use Endroid\QrCode\Label\LabelAlignment;
+use Endroid\QrCode\Label\Margin\Margin;
+use Endroid\QrCode\Label\Margin\MarginInterface;
+use Endroid\QrCode\Logo\Logo;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\PngWriter;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Endroid\QrCode\Writer\ValidatingWriterInterface;
+use Endroid\QrCode\Writer\WriterInterface;
+
+final readonly class Builder implements BuilderInterface
+{
+    public function __construct(
+        private WriterInterface $writer = new PngWriter(),
+        /** @var array<mixed> */
+        private array $writerOptions = [],
+        private bool $validateResult = false,
+        // QrCode options
+        private string $data = '',
+        private EncodingInterface $encoding = new Encoding('UTF-8'),
+        private ErrorCorrectionLevel $errorCorrectionLevel = ErrorCorrectionLevel::Low,
+        private int $size = 300,
+        private int $margin = 10,
+        private RoundBlockSizeMode $roundBlockSizeMode = RoundBlockSizeMode::Margin,
+        private ColorInterface $foregroundColor = new Color(0, 0, 0),
+        private ColorInterface $backgroundColor = new Color(255, 255, 255),
+        // Label options
+        private string $labelText = '',
+        private FontInterface $labelFont = new Font(__DIR__.'/../../assets/open_sans.ttf', 16),
+        private LabelAlignment $labelAlignment = LabelAlignment::Center,
+        private MarginInterface $labelMargin = new Margin(0, 10, 10, 10),
+        private ColorInterface $labelTextColor = new Color(0, 0, 0),
+        // Logo options
+        private string $logoPath = '',
+        private ?int $logoResizeToWidth = null,
+        private ?int $logoResizeToHeight = null,
+        private bool $logoPunchoutBackground = false,
+    ) {
+    }
+
+    /** @param array<mixed>|null $writerOptions */
+    public function build(
+        ?WriterInterface $writer = null,
+        ?array $writerOptions = null,
+        ?bool $validateResult = null,
+        // QrCode options
+        ?string $data = null,
+        ?EncodingInterface $encoding = null,
+        ?ErrorCorrectionLevel $errorCorrectionLevel = null,
+        ?int $size = null,
+        ?int $margin = null,
+        ?RoundBlockSizeMode $roundBlockSizeMode = null,
+        ?ColorInterface $foregroundColor = null,
+        ?ColorInterface $backgroundColor = null,
+        // Label options
+        ?string $labelText = null,
+        ?FontInterface $labelFont = null,
+        ?LabelAlignment $labelAlignment = null,
+        ?MarginInterface $labelMargin = null,
+        ?ColorInterface $labelTextColor = null,
+        // Logo options
+        ?string $logoPath = null,
+        ?int $logoResizeToWidth = null,
+        ?int $logoResizeToHeight = null,
+        ?bool $logoPunchoutBackground = null,
+    ): ResultInterface {
+        if ($this->validateResult && !$this->writer instanceof ValidatingWriterInterface) {
+            throw ValidationException::createForUnsupportedWriter(get_class($this->writer));
+        }
+
+        $writer = $writer ?? $this->writer;
+        $writerOptions = $writerOptions ?? $this->writerOptions;
+        $validateResult = $validateResult ?? $this->validateResult;
+
+        $createLabel = $this->labelText || $labelText;
+        $createLogo = $this->logoPath || $logoPath;
+
+        $qrCode = new QrCode(
+            data: $data ?? $this->data,
+            encoding: $encoding ?? $this->encoding,
+            errorCorrectionLevel: $errorCorrectionLevel ?? $this->errorCorrectionLevel,
+            size: $size ?? $this->size,
+            margin: $margin ?? $this->margin,
+            roundBlockSizeMode: $roundBlockSizeMode ?? $this->roundBlockSizeMode,
+            foregroundColor: $foregroundColor ?? $this->foregroundColor,
+            backgroundColor: $backgroundColor ?? $this->backgroundColor
+        );
+
+        $logo = $createLogo ? new Logo(
+            path: $logoPath ?? $this->logoPath,
+            resizeToWidth: $logoResizeToWidth ?? $this->logoResizeToWidth,
+            resizeToHeight: $logoResizeToHeight ?? $this->logoResizeToHeight,
+            punchoutBackground: $logoPunchoutBackground ?? $this->logoPunchoutBackground
+        ) : null;
+
+        $label = $createLabel ? new Label(
+            text: $labelText ?? $this->labelText,
+            font: $labelFont ?? $this->labelFont,
+            alignment: $labelAlignment ?? $this->labelAlignment,
+            margin: $labelMargin ?? $this->labelMargin,
+            textColor: $labelTextColor ?? $this->labelTextColor
+        ) : null;
+
+        $result = $writer->write($qrCode, $logo, $label, $writerOptions);
+
+        if ($validateResult && $writer instanceof ValidatingWriterInterface) {
+            $writer->validateResult($result, $qrCode->getData());
+        }
+
+        return $result;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Builder/BuilderInterface.php
+Nume: BuilderInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Builder;
+
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Encoding\EncodingInterface;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\Label\Font\FontInterface;
+use Endroid\QrCode\Label\LabelAlignment;
+use Endroid\QrCode\Label\Margin\MarginInterface;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Endroid\QrCode\Writer\WriterInterface;
+
+interface BuilderInterface
+{
+    /** @param array<mixed>|null $writerOptions */
+    public function build(
+        ?WriterInterface $writer = null,
+        ?array $writerOptions = null,
+        ?bool $validateResult = null,
+        // QrCode options
+        ?string $data = null,
+        ?EncodingInterface $encoding = null,
+        ?ErrorCorrectionLevel $errorCorrectionLevel = null,
+        ?int $size = null,
+        ?int $margin = null,
+        ?RoundBlockSizeMode $roundBlockSizeMode = null,
+        ?ColorInterface $foregroundColor = null,
+        ?ColorInterface $backgroundColor = null,
+        // Label options
+        ?string $labelText = null,
+        ?FontInterface $labelFont = null,
+        ?LabelAlignment $labelAlignment = null,
+        ?MarginInterface $labelMargin = null,
+        ?ColorInterface $labelTextColor = null,
+        // Logo options
+        ?string $logoPath = null,
+        ?int $logoResizeToWidth = null,
+        ?int $logoResizeToHeight = null,
+        ?bool $logoPunchoutBackground = null,
+    ): ResultInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Builder/BuilderRegistry.php
+Nume: BuilderRegistry.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Builder;
+
+final class BuilderRegistry implements BuilderRegistryInterface
+{
+    /** @var array<BuilderInterface> */
+    private array $builders = [];
+
+    public function set(string $name, BuilderInterface $builder): void
+    {
+        $this->builders[$name] = $builder;
+    }
+
+    public function get(string $name): BuilderInterface
+    {
+        if (!isset($this->builders[$name])) {
+            throw new \Exception(sprintf('Builder with name "%s" not available from registry', $name));
+        }
+
+        return $this->builders[$name];
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Builder/BuilderRegistryInterface.php
+Nume: BuilderRegistryInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Builder;
+
+interface BuilderRegistryInterface
+{
+    public function set(string $name, BuilderInterface $builder): void;
+
+    public function get(string $name): BuilderInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Color/Color.php
+Nume: Color.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Color;
+
+final readonly class Color implements ColorInterface
+{
+    public function __construct(
+        private int $red,
+        private int $green,
+        private int $blue,
+        private int $alpha = 0,
+    ) {
+    }
+
+    public function getRed(): int
+    {
+        return $this->red;
+    }
+
+    public function getGreen(): int
+    {
+        return $this->green;
+    }
+
+    public function getBlue(): int
+    {
+        return $this->blue;
+    }
+
+    public function getAlpha(): int
+    {
+        return $this->alpha;
+    }
+
+    public function getOpacity(): float
+    {
+        return 1 - $this->alpha / 127;
+    }
+
+    public function getHex(): string
+    {
+        return sprintf('#%02x%02x%02x', $this->red, $this->green, $this->blue);
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'red' => $this->red,
+            'green' => $this->green,
+            'blue' => $this->blue,
+            'alpha' => $this->alpha,
+        ];
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Color/ColorInterface.php
+Nume: ColorInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Color;
+
+interface ColorInterface
+{
+    public function getRed(): int;
+
+    public function getGreen(): int;
+
+    public function getBlue(): int;
+
+    public function getAlpha(): int;
+
+    public function getOpacity(): float;
+
+    public function getHex(): string;
+
+    /** @return array<string, int> */
+    public function toArray(): array;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Encoding/Encoding.php
+Nume: Encoding.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Encoding;
+
+final readonly class Encoding implements EncodingInterface
+{
+    public function __construct(
+        private string $value,
+    ) {
+        if ('UTF-8' !== $value) {
+            if (!function_exists('mb_list_encodings')) {
+                throw new \Exception('Unable to validate encoding: make sure the mbstring extension is installed and enabled');
+            }
+
+            if (!in_array($value, mb_list_encodings())) {
+                throw new \Exception(sprintf('Invalid encoding "%s": choose one of '.implode(', ', mb_list_encodings()), $value));
+            }
+        }
+    }
+
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Encoding/EncodingInterface.php
+Nume: EncodingInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Encoding;
+
+interface EncodingInterface extends \Stringable
+{
+    public function __toString(): string;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/ErrorCorrectionLevel.php
+Nume: ErrorCorrectionLevel.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode;
+
+enum ErrorCorrectionLevel: string
+{
+    case High = 'high';
+    case Low = 'low';
+    case Medium = 'medium';
+    case Quartile = 'quartile';
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Exception/ValidationException.php
+Nume: ValidationException.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Exception;
+
+final class ValidationException extends \Exception
+{
+    public static function createForUnsupportedWriter(string $writerClass): self
+    {
+        return new self(sprintf('Unable to validate the result: "%s" does not support validation', $writerClass));
+    }
+
+    public static function createForMissingPackage(string $packageName): self
+    {
+        return new self(sprintf('Please install "%s" or disable image validation', $packageName));
+    }
+
+    public static function createForInvalidData(string $expectedData, string $actualData): self
+    {
+        return new self('The validation reader read "'.$actualData.'" instead of "'.$expectedData.'". Adjust your parameters to increase readability or disable validation.');
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/ImageData/LabelImageData.php
+Nume: LabelImageData.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\ImageData;
+
+use Endroid\QrCode\Label\LabelInterface;
+
+final readonly class LabelImageData
+{
+    private function __construct(
+        private int $width,
+        private int $height,
+    ) {
+    }
+
+    public static function createForLabel(LabelInterface $label): self
+    {
+        if (str_contains($label->getText(), "\n")) {
+            throw new \Exception('Label does not support line breaks');
+        }
+
+        if (!function_exists('imagettfbbox')) {
+            throw new \Exception('Function "imagettfbbox" does not exist: check your FreeType installation');
+        }
+
+        $labelBox = imagettfbbox($label->getFont()->getSize(), 0, $label->getFont()->getPath(), $label->getText());
+
+        if (!is_array($labelBox)) {
+            throw new \Exception('Unable to generate label image box: check your FreeType installation');
+        }
+
+        return new self(
+            intval($labelBox[2] - $labelBox[0]),
+            intval($labelBox[0] - $labelBox[7])
+        );
+    }
+
+    public function getWidth(): int
+    {
+        return $this->width;
+    }
+
+    public function getHeight(): int
+    {
+        return $this->height;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/ImageData/LogoImageData.php
+Nume: LogoImageData.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\ImageData;
+
+use Endroid\QrCode\Logo\LogoInterface;
+
+final class LogoImageData
+{
+    private function __construct(
+        private readonly string $data,
+        private ?\GdImage $image,
+        private readonly string $mimeType,
+        private readonly int $width,
+        private readonly int $height,
+        private readonly bool $punchoutBackground,
+    ) {
+    }
+
+    public static function createForLogo(LogoInterface $logo): self
+    {
+        error_clear_last();
+        $data = @file_get_contents($logo->getPath());
+
+        if (!is_string($data)) {
+            $errorDetails = error_get_last()['message'] ?? 'invalid data';
+            throw new \Exception(sprintf('Could not read logo image data from path "%s": %s', $logo->getPath(), $errorDetails));
+        }
+
+        if (false !== filter_var($logo->getPath(), FILTER_VALIDATE_URL)) {
+            $mimeType = self::detectMimeTypeFromUrl($logo->getPath());
+        } else {
+            $mimeType = self::detectMimeTypeFromPath($logo->getPath());
+        }
+
+        $width = $logo->getResizeToWidth();
+        $height = $logo->getResizeToHeight();
+
+        if ('image/svg+xml' === $mimeType) {
+            if (null === $width || null === $height) {
+                throw new \Exception('SVG Logos require an explicitly set resize width and height');
+            }
+
+            return new self($data, null, $mimeType, $width, $height, $logo->getPunchoutBackground());
+        }
+
+        error_clear_last();
+        $image = @imagecreatefromstring($data);
+
+        if (!$image) {
+            $errorDetails = error_get_last()['message'] ?? 'invalid data';
+            throw new \Exception(sprintf('Unable to parse image data at path "%s": %s', $logo->getPath(), $errorDetails));
+        }
+
+        // No target width and height specified: use from original image
+        if (null !== $width && null !== $height) {
+            return new self($data, $image, $mimeType, $width, $height, $logo->getPunchoutBackground());
+        }
+
+        // Only target width specified: calculate height
+        if (null !== $width && null === $height) {
+            return new self($data, $image, $mimeType, $width, intval(imagesy($image) * $width / imagesx($image)), $logo->getPunchoutBackground());
+        }
+
+        // Only target height specified: calculate width
+        if (null === $width && null !== $height) {
+            return new self($data, $image, $mimeType, intval(imagesx($image) * $height / imagesy($image)), $height, $logo->getPunchoutBackground());
+        }
+
+        return new self($data, $image, $mimeType, imagesx($image), imagesy($image), $logo->getPunchoutBackground());
+    }
+
+    public function getData(): string
+    {
+        return $this->data;
+    }
+
+    public function getImage(): \GdImage
+    {
+        if (!$this->image instanceof \GdImage) {
+            throw new \Exception('SVG Images have no image resource');
+        }
+
+        return $this->image;
+    }
+
+    public function getMimeType(): string
+    {
+        return $this->mimeType;
+    }
+
+    public function getWidth(): int
+    {
+        return $this->width;
+    }
+
+    public function getHeight(): int
+    {
+        return $this->height;
+    }
+
+    public function getPunchoutBackground(): bool
+    {
+        return $this->punchoutBackground;
+    }
+
+    public function createDataUri(): string
+    {
+        return 'data:'.$this->mimeType.';base64,'.base64_encode($this->data);
+    }
+
+    private static function detectMimeTypeFromUrl(string $url): string
+    {
+        $headers = get_headers($url, true);
+
+        if (!is_array($headers)) {
+            throw new \Exception(sprintf('Could not retrieve headers to determine content type for logo URL "%s"', $url));
+        }
+
+        $headers = array_combine(array_map('strtolower', array_keys($headers)), $headers);
+
+        if (!isset($headers['content-type'])) {
+            throw new \Exception(sprintf('Content type could not be determined for logo URL "%s"', $url));
+        }
+
+        return is_array($headers['content-type']) ? $headers['content-type'][1] : $headers['content-type'];
+    }
+
+    private static function detectMimeTypeFromPath(string $path): string
+    {
+        if (!function_exists('mime_content_type')) {
+            throw new \Exception('You need the ext-fileinfo extension to determine logo mime type');
+        }
+
+        error_clear_last();
+        $mimeType = @mime_content_type($path);
+
+        if (!is_string($mimeType)) {
+            $errorDetails = error_get_last()['message'] ?? 'invalid data';
+            throw new \Exception(sprintf('Could not determine mime type: %s', $errorDetails));
+        }
+
+        if (!preg_match('#^image/#', $mimeType)) {
+            throw new \Exception('Logo path is not an image');
+        }
+
+        // Passing mime type image/svg results in invisible images
+        if ('image/svg' === $mimeType) {
+            return 'image/svg+xml';
+        }
+
+        return $mimeType;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Font/Font.php
+Nume: Font.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label\Font;
+
+final readonly class Font implements FontInterface
+{
+    public function __construct(
+        private string $path,
+        private int $size = 16,
+    ) {
+        $this->assertValidPath($path);
+    }
+
+    private function assertValidPath(string $path): void
+    {
+        if (!file_exists($path)) {
+            throw new \Exception(sprintf('Invalid font path "%s"', $path));
+        }
+    }
+
+    public function getPath(): string
+    {
+        return $this->path;
+    }
+
+    public function getSize(): int
+    {
+        return $this->size;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Font/FontInterface.php
+Nume: FontInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label\Font;
+
+interface FontInterface
+{
+    public function getPath(): string;
+
+    public function getSize(): int;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Font/OpenSans.php
+Nume: OpenSans.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label\Font;
+
+final readonly class OpenSans implements FontInterface
+{
+    public function __construct(
+        private int $size = 16,
+    ) {
+    }
+
+    public function getPath(): string
+    {
+        return __DIR__.'/../../../assets/open_sans.ttf';
+    }
+
+    public function getSize(): int
+    {
+        return $this->size;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Label.php
+Nume: Label.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label;
+
+use Endroid\QrCode\Color\Color;
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Label\Font\Font;
+use Endroid\QrCode\Label\Font\FontInterface;
+use Endroid\QrCode\Label\Margin\Margin;
+use Endroid\QrCode\Label\Margin\MarginInterface;
+
+final readonly class Label implements LabelInterface
+{
+    public function __construct(
+        private string $text,
+        private FontInterface $font = new Font(__DIR__.'/../../assets/open_sans.ttf', 16),
+        private LabelAlignment $alignment = LabelAlignment::Center,
+        private MarginInterface $margin = new Margin(0, 10, 10, 10),
+        private ColorInterface $textColor = new Color(0, 0, 0),
+    ) {
+    }
+
+    public function getText(): string
+    {
+        return $this->text;
+    }
+
+    public function getFont(): FontInterface
+    {
+        return $this->font;
+    }
+
+    public function getAlignment(): LabelAlignment
+    {
+        return $this->alignment;
+    }
+
+    public function getMargin(): MarginInterface
+    {
+        return $this->margin;
+    }
+
+    public function getTextColor(): ColorInterface
+    {
+        return $this->textColor;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/LabelAlignment.php
+Nume: LabelAlignment.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label;
+
+enum LabelAlignment: string
+{
+    case Center = 'center';
+    case Left = 'left';
+    case Right = 'right';
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/LabelInterface.php
+Nume: LabelInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label;
+
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Label\Font\FontInterface;
+use Endroid\QrCode\Label\Margin\MarginInterface;
+
+interface LabelInterface
+{
+    public function getText(): string;
+
+    public function getFont(): FontInterface;
+
+    public function getAlignment(): LabelAlignment;
+
+    public function getMargin(): MarginInterface;
+
+    public function getTextColor(): ColorInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Margin/Margin.php
+Nume: Margin.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label\Margin;
+
+final readonly class Margin implements MarginInterface
+{
+    public function __construct(
+        private int $top,
+        private int $right,
+        private int $bottom,
+        private int $left,
+    ) {
+    }
+
+    public function getTop(): int
+    {
+        return $this->top;
+    }
+
+    public function getRight(): int
+    {
+        return $this->right;
+    }
+
+    public function getBottom(): int
+    {
+        return $this->bottom;
+    }
+
+    public function getLeft(): int
+    {
+        return $this->left;
+    }
+
+    /** @return array<string, int> */
+    public function toArray(): array
+    {
+        return [
+            'top' => $this->top,
+            'right' => $this->right,
+            'bottom' => $this->bottom,
+            'left' => $this->left,
+        ];
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Label/Margin/MarginInterface.php
+Nume: MarginInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Label\Margin;
+
+interface MarginInterface
+{
+    public function getTop(): int;
+
+    public function getRight(): int;
+
+    public function getBottom(): int;
+
+    public function getLeft(): int;
+
+    /** @return array<string, int> */
+    public function toArray(): array;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Logo/Logo.php
+Nume: Logo.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Logo;
+
+final readonly class Logo implements LogoInterface
+{
+    public function __construct(
+        private string $path,
+        private ?int $resizeToWidth = null,
+        private ?int $resizeToHeight = null,
+        private bool $punchoutBackground = false,
+    ) {
+    }
+
+    public function getPath(): string
+    {
+        return $this->path;
+    }
+
+    public function getResizeToWidth(): ?int
+    {
+        return $this->resizeToWidth;
+    }
+
+    public function getResizeToHeight(): ?int
+    {
+        return $this->resizeToHeight;
+    }
+
+    public function getPunchoutBackground(): bool
+    {
+        return $this->punchoutBackground;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Logo/LogoInterface.php
+Nume: LogoInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Logo;
+
+interface LogoInterface
+{
+    public function getPath(): string;
+
+    public function getResizeToWidth(): ?int;
+
+    public function getResizeToHeight(): ?int;
+
+    public function getPunchoutBackground(): bool;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Matrix/Matrix.php
+Nume: Matrix.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Matrix;
+
+use Endroid\QrCode\RoundBlockSizeMode;
+
+final readonly class Matrix implements MatrixInterface
+{
+    private float $blockSize;
+    private int $innerSize;
+    private int $outerSize;
+    private int $marginLeft;
+    private int $marginRight;
+
+    /** @param array<array<int>> $blockValues */
+    public function __construct(
+        private array $blockValues,
+        int $size,
+        int $margin,
+        RoundBlockSizeMode $roundBlockSizeMode,
+    ) {
+        $blockSize = $size / $this->getBlockCount();
+        $innerSize = $size;
+        $outerSize = $size + 2 * $margin;
+
+        switch ($roundBlockSizeMode) {
+            case RoundBlockSizeMode::Enlarge:
+                $blockSize = intval(ceil($blockSize));
+                $innerSize = intval($blockSize * $this->getBlockCount());
+                $outerSize = $innerSize + 2 * $margin;
+                break;
+            case RoundBlockSizeMode::Shrink:
+                $blockSize = intval(floor($blockSize));
+                $innerSize = intval($blockSize * $this->getBlockCount());
+                $outerSize = $innerSize + 2 * $margin;
+                break;
+            case RoundBlockSizeMode::Margin:
+                $blockSize = intval(floor($blockSize));
+                $innerSize = intval($blockSize * $this->getBlockCount());
+                break;
+        }
+
+        if ($blockSize < 1) {
+            throw new \Exception('Too much data: increase image dimensions or lower error correction level');
+        }
+
+        $this->blockSize = $blockSize;
+        $this->innerSize = $innerSize;
+        $this->outerSize = $outerSize;
+        $this->marginLeft = intval(($this->outerSize - $this->innerSize) / 2);
+        $this->marginRight = $this->outerSize - $this->innerSize - $this->marginLeft;
+    }
+
+    public function getBlockValue(int $rowIndex, int $columnIndex): int
+    {
+        return $this->blockValues[$rowIndex][$columnIndex];
+    }
+
+    public function getBlockCount(): int
+    {
+        return count($this->blockValues[0]);
+    }
+
+    public function getBlockSize(): float
+    {
+        return $this->blockSize;
+    }
+
+    public function getInnerSize(): int
+    {
+        return $this->innerSize;
+    }
+
+    public function getOuterSize(): int
+    {
+        return $this->outerSize;
+    }
+
+    public function getMarginLeft(): int
+    {
+        return $this->marginLeft;
+    }
+
+    public function getMarginRight(): int
+    {
+        return $this->marginRight;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Matrix/MatrixFactoryInterface.php
+Nume: MatrixFactoryInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Matrix;
+
+use Endroid\QrCode\QrCodeInterface;
+
+interface MatrixFactoryInterface
+{
+    public function create(QrCodeInterface $qrCode): MatrixInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Matrix/MatrixInterface.php
+Nume: MatrixInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Matrix;
+
+interface MatrixInterface
+{
+    public function getBlockValue(int $rowIndex, int $columnIndex): int;
+
+    public function getBlockCount(): int;
+
+    public function getBlockSize(): float;
+
+    public function getInnerSize(): int;
+
+    public function getOuterSize(): int;
+
+    public function getMarginLeft(): int;
+
+    public function getMarginRight(): int;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/QrCode.php
+Nume: QrCode.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode;
+
+use Endroid\QrCode\Color\Color;
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\Encoding\EncodingInterface;
+
+final readonly class QrCode implements QrCodeInterface
+{
+    public function __construct(
+        private string $data,
+        private EncodingInterface $encoding = new Encoding('UTF-8'),
+        private ErrorCorrectionLevel $errorCorrectionLevel = ErrorCorrectionLevel::Low,
+        private int $size = 300,
+        private int $margin = 10,
+        private RoundBlockSizeMode $roundBlockSizeMode = RoundBlockSizeMode::Margin,
+        private ColorInterface $foregroundColor = new Color(0, 0, 0),
+        private ColorInterface $backgroundColor = new Color(255, 255, 255),
+    ) {
+    }
+
+    public function getData(): string
+    {
+        return $this->data;
+    }
+
+    public function getEncoding(): EncodingInterface
+    {
+        return $this->encoding;
+    }
+
+    public function getErrorCorrectionLevel(): ErrorCorrectionLevel
+    {
+        return $this->errorCorrectionLevel;
+    }
+
+    public function getSize(): int
+    {
+        return $this->size;
+    }
+
+    public function getMargin(): int
+    {
+        return $this->margin;
+    }
+
+    public function getRoundBlockSizeMode(): RoundBlockSizeMode
+    {
+        return $this->roundBlockSizeMode;
+    }
+
+    public function getForegroundColor(): ColorInterface
+    {
+        return $this->foregroundColor;
+    }
+
+    public function getBackgroundColor(): ColorInterface
+    {
+        return $this->backgroundColor;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/QrCodeInterface.php
+Nume: QrCodeInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode;
+
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Encoding\EncodingInterface;
+
+interface QrCodeInterface
+{
+    public function getData(): string;
+
+    public function getEncoding(): EncodingInterface;
+
+    public function getErrorCorrectionLevel(): ErrorCorrectionLevel;
+
+    public function getSize(): int;
+
+    public function getMargin(): int;
+
+    public function getRoundBlockSizeMode(): RoundBlockSizeMode;
+
+    public function getForegroundColor(): ColorInterface;
+
+    public function getBackgroundColor(): ColorInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/RoundBlockSizeMode.php
+Nume: RoundBlockSizeMode.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode;
+
+enum RoundBlockSizeMode: string
+{
+    case Enlarge = 'enlarge';
+    case Margin = 'margin';
+    case None = 'none';
+    case Shrink = 'shrink';
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/AbstractGdWriter.php
+Nume: AbstractGdWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Exception\ValidationException;
+use Endroid\QrCode\ImageData\LabelImageData;
+use Endroid\QrCode\ImageData\LogoImageData;
+use Endroid\QrCode\Label\LabelAlignment;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\Matrix\MatrixInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Endroid\QrCode\Writer\Result\GdResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Zxing\QrReader;
+
+abstract readonly class AbstractGdWriter implements WriterInterface, ValidatingWriterInterface
+{
+    protected function getMatrix(QrCodeInterface $qrCode): MatrixInterface
+    {
+        $matrixFactory = new MatrixFactory();
+
+        return $matrixFactory->create($qrCode);
+    }
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        if (!extension_loaded('gd')) {
+            throw new \Exception('Unable to generate image: please check if the GD extension is enabled and configured correctly');
+        }
+
+        $matrix = $this->getMatrix($qrCode);
+
+        $baseBlockSize = RoundBlockSizeMode::None === $qrCode->getRoundBlockSizeMode() ? 10 : intval($matrix->getBlockSize());
+        $baseImage = imagecreatetruecolor($matrix->getBlockCount() * $baseBlockSize, $matrix->getBlockCount() * $baseBlockSize);
+
+        if (!$baseImage) {
+            throw new \Exception('Unable to generate image: please check if the GD extension is enabled and configured correctly');
+        }
+
+        /** @var int $foregroundColor */
+        $foregroundColor = imagecolorallocatealpha(
+            $baseImage,
+            $qrCode->getForegroundColor()->getRed(),
+            $qrCode->getForegroundColor()->getGreen(),
+            $qrCode->getForegroundColor()->getBlue(),
+            $qrCode->getForegroundColor()->getAlpha()
+        );
+
+        /** @var int $transparentColor */
+        $transparentColor = imagecolorallocatealpha($baseImage, 255, 255, 255, 127);
+
+        imagefill($baseImage, 0, 0, $transparentColor);
+
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                if (1 === $matrix->getBlockValue($rowIndex, $columnIndex)) {
+                    imagefilledrectangle(
+                        $baseImage,
+                        $columnIndex * $baseBlockSize,
+                        $rowIndex * $baseBlockSize,
+                        ($columnIndex + 1) * $baseBlockSize - 1,
+                        ($rowIndex + 1) * $baseBlockSize - 1,
+                        $foregroundColor
+                    );
+                }
+            }
+        }
+
+        $targetWidth = $matrix->getOuterSize();
+        $targetHeight = $matrix->getOuterSize();
+
+        if ($label instanceof LabelInterface) {
+            $labelImageData = LabelImageData::createForLabel($label);
+            $targetHeight += $labelImageData->getHeight() + $label->getMargin()->getTop() + $label->getMargin()->getBottom();
+        }
+
+        $targetImage = imagecreatetruecolor($targetWidth, $targetHeight);
+
+        if (!$targetImage) {
+            throw new \Exception('Unable to generate image: please check if the GD extension is enabled and configured correctly');
+        }
+
+        /** @var int $backgroundColor */
+        $backgroundColor = imagecolorallocatealpha(
+            $targetImage,
+            $qrCode->getBackgroundColor()->getRed(),
+            $qrCode->getBackgroundColor()->getGreen(),
+            $qrCode->getBackgroundColor()->getBlue(),
+            $qrCode->getBackgroundColor()->getAlpha()
+        );
+
+        imagefill($targetImage, 0, 0, $backgroundColor);
+
+        imagecopyresampled(
+            $targetImage,
+            $baseImage,
+            $matrix->getMarginLeft(),
+            $matrix->getMarginLeft(),
+            0,
+            0,
+            $matrix->getInnerSize(),
+            $matrix->getInnerSize(),
+            imagesx($baseImage),
+            imagesy($baseImage)
+        );
+
+        if ($qrCode->getBackgroundColor()->getAlpha() > 0) {
+            imagesavealpha($targetImage, true);
+        }
+
+        $result = new GdResult($matrix, $targetImage);
+
+        if ($logo instanceof LogoInterface) {
+            $result = $this->addLogo($logo, $result);
+        }
+
+        if ($label instanceof LabelInterface) {
+            $result = $this->addLabel($label, $result);
+        }
+
+        return $result;
+    }
+
+    private function addLogo(LogoInterface $logo, GdResult $result): GdResult
+    {
+        $logoImageData = LogoImageData::createForLogo($logo);
+
+        if ('image/svg+xml' === $logoImageData->getMimeType()) {
+            throw new \Exception('PNG Writer does not support SVG logo');
+        }
+
+        $targetImage = $result->getImage();
+        $matrix = $result->getMatrix();
+
+        if ($logoImageData->getPunchoutBackground()) {
+            /** @var int $transparent */
+            $transparent = imagecolorallocatealpha($targetImage, 255, 255, 255, 127);
+            imagealphablending($targetImage, false);
+            $xOffsetStart = intval($matrix->getOuterSize() / 2 - $logoImageData->getWidth() / 2);
+            $yOffsetStart = intval($matrix->getOuterSize() / 2 - $logoImageData->getHeight() / 2);
+            for ($xOffset = $xOffsetStart; $xOffset < $xOffsetStart + $logoImageData->getWidth(); ++$xOffset) {
+                for ($yOffset = $yOffsetStart; $yOffset < $yOffsetStart + $logoImageData->getHeight(); ++$yOffset) {
+                    imagesetpixel($targetImage, $xOffset, $yOffset, $transparent);
+                }
+            }
+        }
+
+        imagecopyresampled(
+            $targetImage,
+            $logoImageData->getImage(),
+            intval($matrix->getOuterSize() / 2 - $logoImageData->getWidth() / 2),
+            intval($matrix->getOuterSize() / 2 - $logoImageData->getHeight() / 2),
+            0,
+            0,
+            $logoImageData->getWidth(),
+            $logoImageData->getHeight(),
+            imagesx($logoImageData->getImage()),
+            imagesy($logoImageData->getImage())
+        );
+
+        return new GdResult($matrix, $targetImage);
+    }
+
+    private function addLabel(LabelInterface $label, GdResult $result): GdResult
+    {
+        $targetImage = $result->getImage();
+
+        $labelImageData = LabelImageData::createForLabel($label);
+
+        /** @var int $textColor */
+        $textColor = imagecolorallocatealpha(
+            $targetImage,
+            $label->getTextColor()->getRed(),
+            $label->getTextColor()->getGreen(),
+            $label->getTextColor()->getBlue(),
+            $label->getTextColor()->getAlpha()
+        );
+
+        $x = intval(imagesx($targetImage) / 2 - $labelImageData->getWidth() / 2);
+        $y = imagesy($targetImage) - $label->getMargin()->getBottom();
+
+        if (LabelAlignment::Left === $label->getAlignment()) {
+            $x = $label->getMargin()->getLeft();
+        } elseif (LabelAlignment::Right === $label->getAlignment()) {
+            $x = imagesx($targetImage) - $labelImageData->getWidth() - $label->getMargin()->getRight();
+        }
+
+        imagettftext($targetImage, $label->getFont()->getSize(), 0, $x, $y, $textColor, $label->getFont()->getPath(), $label->getText());
+
+        return new GdResult($result->getMatrix(), $targetImage);
+    }
+
+    public function validateResult(ResultInterface $result, string $expectedData): void
+    {
+        $string = $result->getString();
+
+        if (!class_exists(QrReader::class)) {
+            throw ValidationException::createForMissingPackage('khanamiryan/qrcode-detector-decoder');
+        }
+
+        $reader = new QrReader($string, QrReader::SOURCE_TYPE_BLOB);
+        if ($reader->text() !== $expectedData) {
+            throw ValidationException::createForInvalidData($expectedData, strval($reader->text()));
+        }
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/BinaryWriter.php
+Nume: BinaryWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\BinaryResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class BinaryWriter implements WriterInterface
+{
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        return new BinaryResult($matrix);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/ConsoleWriter.php
+Nume: ConsoleWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\ConsoleResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class ConsoleWriter implements WriterInterface
+{
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, $options = []): ResultInterface
+    {
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        return new ConsoleResult($matrix, $qrCode->getForegroundColor(), $qrCode->getBackgroundColor());
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/DebugWriter.php
+Nume: DebugWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\DebugResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class DebugWriter implements WriterInterface, ValidatingWriterInterface
+{
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        return new DebugResult($matrix, $qrCode, $logo, $label, $options);
+    }
+
+    public function validateResult(ResultInterface $result, string $expectedData): void
+    {
+        if (!$result instanceof DebugResult) {
+            throw new \Exception('Unable to write logo: instance of DebugResult expected');
+        }
+
+        $result->setValidateResult(true);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/EpsWriter.php
+Nume: EpsWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\EpsResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class EpsWriter implements WriterInterface
+{
+    public const DECIMAL_PRECISION = 10;
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        $lines = [
+            '%!PS-Adobe-3.0 EPSF-3.0',
+            '%%BoundingBox: 0 0 '.$matrix->getOuterSize().' '.$matrix->getOuterSize(),
+            '/F { rectfill } def',
+            number_format($qrCode->getBackgroundColor()->getRed() / 100, 2, '.', ',').' '.number_format($qrCode->getBackgroundColor()->getGreen() / 100, 2, '.', ',').' '.number_format($qrCode->getBackgroundColor()->getBlue() / 100, 2, '.', ',').' setrgbcolor',
+            '0 0 '.$matrix->getOuterSize().' '.$matrix->getOuterSize().' F',
+            number_format($qrCode->getForegroundColor()->getRed() / 100, 2, '.', ',').' '.number_format($qrCode->getForegroundColor()->getGreen() / 100, 2, '.', ',').' '.number_format($qrCode->getForegroundColor()->getBlue() / 100, 2, '.', ',').' setrgbcolor',
+        ];
+
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                if (1 === $matrix->getBlockValue($matrix->getBlockCount() - 1 - $rowIndex, $columnIndex)) {
+                    $x = $matrix->getMarginLeft() + $matrix->getBlockSize() * $columnIndex;
+                    $y = $matrix->getMarginLeft() + $matrix->getBlockSize() * $rowIndex;
+                    $lines[] = number_format($x, self::DECIMAL_PRECISION, '.', '').' '.number_format($y, self::DECIMAL_PRECISION, '.', '').' '.number_format($matrix->getBlockSize(), self::DECIMAL_PRECISION, '.', '').' '.number_format($matrix->getBlockSize(), self::DECIMAL_PRECISION, '.', '').' F';
+                }
+            }
+        }
+
+        return new EpsResult($matrix, $lines);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/GifWriter.php
+Nume: GifWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\GdResult;
+use Endroid\QrCode\Writer\Result\GifResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class GifWriter extends AbstractGdWriter
+{
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        /** @var GdResult $gdResult */
+        $gdResult = parent::write($qrCode, $logo, $label, $options);
+
+        return new GifResult($gdResult->getMatrix(), $gdResult->getImage());
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/PdfWriter.php
+Nume: PdfWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\PdfResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class PdfWriter implements WriterInterface
+{
+    public const WRITER_OPTION_UNIT = 'unit';
+    public const WRITER_OPTION_PDF = 'fpdf';
+    public const WRITER_OPTION_X = 'x';
+    public const WRITER_OPTION_Y = 'y';
+    public const WRITER_OPTION_LINK = 'link';
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        $unit = 'mm';
+        if (isset($options[self::WRITER_OPTION_UNIT])) {
+            $unit = $options[self::WRITER_OPTION_UNIT];
+        }
+
+        $allowedUnits = ['mm', 'pt', 'cm', 'in'];
+        if (!in_array($unit, $allowedUnits)) {
+            throw new \Exception(sprintf('PDF Measure unit should be one of [%s]', implode(', ', $allowedUnits)));
+        }
+
+        $labelSpace = 0;
+        if ($label instanceof LabelInterface) {
+            $labelSpace = 30;
+        }
+
+        if (!class_exists(\FPDF::class)) {
+            throw new \Exception('Unable to find FPDF: check your installation');
+        }
+
+        $foregroundColor = $qrCode->getForegroundColor();
+        if ($foregroundColor->getAlpha() > 0) {
+            throw new \Exception('PDF Writer does not support alpha channels');
+        }
+        $backgroundColor = $qrCode->getBackgroundColor();
+        if ($backgroundColor->getAlpha() > 0) {
+            throw new \Exception('PDF Writer does not support alpha channels');
+        }
+
+        if (isset($options[self::WRITER_OPTION_PDF])) {
+            $fpdf = $options[self::WRITER_OPTION_PDF];
+            if (!$fpdf instanceof \FPDF) {
+                throw new \Exception('pdf option must be an instance of FPDF');
+            }
+        } else {
+            // @todo Check how to add label height later
+            $fpdf = new \FPDF('P', $unit, [$matrix->getOuterSize(), $matrix->getOuterSize() + $labelSpace]);
+            $fpdf->AddPage();
+        }
+
+        $x = 0;
+        if (isset($options[self::WRITER_OPTION_X])) {
+            $x = $options[self::WRITER_OPTION_X];
+        }
+        $y = 0;
+        if (isset($options[self::WRITER_OPTION_Y])) {
+            $y = $options[self::WRITER_OPTION_Y];
+        }
+
+        $fpdf->SetFillColor($backgroundColor->getRed(), $backgroundColor->getGreen(), $backgroundColor->getBlue());
+        $fpdf->Rect($x, $y, $matrix->getOuterSize(), $matrix->getOuterSize(), 'F');
+        $fpdf->SetFillColor($foregroundColor->getRed(), $foregroundColor->getGreen(), $foregroundColor->getBlue());
+
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                if (1 === $matrix->getBlockValue($rowIndex, $columnIndex)) {
+                    $fpdf->Rect(
+                        $x + $matrix->getMarginLeft() + ($columnIndex * $matrix->getBlockSize()),
+                        $y + $matrix->getMarginLeft() + ($rowIndex * $matrix->getBlockSize()),
+                        $matrix->getBlockSize(),
+                        $matrix->getBlockSize(),
+                        'F'
+                    );
+                }
+            }
+        }
+
+        if ($logo instanceof LogoInterface) {
+            $this->addLogo($logo, $fpdf, $x, $y, $matrix->getOuterSize());
+        }
+
+        if ($label instanceof LabelInterface) {
+            $fpdf->SetXY($x, $y + $matrix->getOuterSize() + $labelSpace - 25);
+            $fpdf->SetFont('Helvetica', '', $label->getFont()->getSize());
+            $fpdf->Cell($matrix->getOuterSize(), 0, $label->getText(), 0, 0, 'C');
+        }
+
+        if (isset($options[self::WRITER_OPTION_LINK])) {
+            $link = $options[self::WRITER_OPTION_LINK];
+            $fpdf->Link($x, $y, $x + $matrix->getOuterSize(), $y + $matrix->getOuterSize(), $link);
+        }
+
+        return new PdfResult($matrix, $fpdf);
+    }
+
+    private function addLogo(LogoInterface $logo, \FPDF $fpdf, float $x, float $y, float $size): void
+    {
+        $logoPath = $logo->getPath();
+        $logoHeight = $logo->getResizeToHeight();
+        $logoWidth = $logo->getResizeToWidth();
+
+        if (null === $logoHeight || null === $logoWidth) {
+            $imageSize = \getimagesize($logoPath);
+            if (!$imageSize) {
+                throw new \Exception(sprintf('Unable to read image size for logo "%s"', $logoPath));
+            }
+            [$logoSourceWidth, $logoSourceHeight] = $imageSize;
+
+            if (null === $logoWidth) {
+                $logoWidth = (int) $logoSourceWidth;
+            }
+
+            if (null === $logoHeight) {
+                $aspectRatio = $logoWidth / $logoSourceWidth;
+                $logoHeight = (int) ($logoSourceHeight * $aspectRatio);
+            }
+        }
+
+        $logoX = $x + $size / 2 - $logoWidth / 2;
+        $logoY = $y + $size / 2 - $logoHeight / 2;
+
+        $fpdf->Image($logoPath, $logoX, $logoY, $logoWidth, $logoHeight);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/PngWriter.php
+Nume: PngWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\GdResult;
+use Endroid\QrCode\Writer\Result\PngResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+final readonly class PngWriter extends AbstractGdWriter
+{
+    public const WRITER_OPTION_COMPRESSION_LEVEL = 'compression_level';
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        if (!isset($options[self::WRITER_OPTION_COMPRESSION_LEVEL])) {
+            $options[self::WRITER_OPTION_COMPRESSION_LEVEL] = -1;
+        }
+
+        /** @var GdResult $gdResult */
+        $gdResult = parent::write($qrCode, $logo, $label, $options);
+
+        return new PngResult($gdResult->getMatrix(), $gdResult->getImage(), $options[self::WRITER_OPTION_COMPRESSION_LEVEL]);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/AbstractResult.php
+Nume: AbstractResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+abstract class AbstractResult implements ResultInterface
+{
+    public function __construct(
+        private readonly MatrixInterface $matrix,
+    ) {
+    }
+
+    public function getMatrix(): MatrixInterface
+    {
+        return $this->matrix;
+    }
+
+    public function getDataUri(): string
+    {
+        return 'data:'.$this->getMimeType().';base64,'.base64_encode($this->getString());
+    }
+
+    public function saveToFile(string $path): void
+    {
+        $string = $this->getString();
+        file_put_contents($path, $string);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/BinaryResult.php
+Nume: BinaryResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class BinaryResult extends AbstractResult
+{
+    public function __construct(MatrixInterface $matrix)
+    {
+        parent::__construct($matrix);
+    }
+
+    public function getString(): string
+    {
+        $matrix = $this->getMatrix();
+
+        $binaryString = '';
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                $binaryString .= $matrix->getBlockValue($rowIndex, $columnIndex);
+            }
+            $binaryString .= "\n";
+        }
+
+        return $binaryString;
+    }
+
+    public function getMimeType(): string
+    {
+        return 'text/plain';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/ConsoleResult.php
+Nume: ConsoleResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Color\ColorInterface;
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class ConsoleResult extends AbstractResult
+{
+    private const TWO_BLOCKS = [
+        0 => ' ',
+        1 => "\xe2\x96\x80",
+        2 => "\xe2\x96\x84",
+        3 => "\xe2\x96\x88",
+    ];
+
+    private string $colorEscapeCode;
+
+    public function __construct(
+        MatrixInterface $matrix,
+        ColorInterface $foreground,
+        ColorInterface $background,
+    ) {
+        parent::__construct($matrix);
+
+        $this->colorEscapeCode = sprintf(
+            "\e[38;2;%d;%d;%dm\e[48;2;%d;%d;%dm",
+            $foreground->getRed(),
+            $foreground->getGreen(),
+            $foreground->getBlue(),
+            $background->getRed(),
+            $background->getGreen(),
+            $background->getBlue()
+        );
+    }
+
+    public function getMimeType(): string
+    {
+        return 'text/plain';
+    }
+
+    public function getString(): string
+    {
+        $matrix = $this->getMatrix();
+
+        $side = $matrix->getBlockCount();
+        $marginLeft = $this->colorEscapeCode.self::TWO_BLOCKS[0].self::TWO_BLOCKS[0];
+        $marginRight = self::TWO_BLOCKS[0].self::TWO_BLOCKS[0]."\e[0m".PHP_EOL;
+        $marginVertical = $marginLeft.str_repeat(self::TWO_BLOCKS[0], $side).$marginRight;
+
+        $qrCodeString = $marginVertical;
+        for ($rowIndex = 0; $rowIndex < $side; $rowIndex += 2) {
+            $qrCodeString .= $marginLeft;
+            for ($columnIndex = 0; $columnIndex < $side; ++$columnIndex) {
+                $combined = $matrix->getBlockValue($rowIndex, $columnIndex);
+                if ($rowIndex + 1 < $side) {
+                    $combined |= $matrix->getBlockValue($rowIndex + 1, $columnIndex) << 1;
+                }
+                $qrCodeString .= self::TWO_BLOCKS[$combined];
+            }
+            $qrCodeString .= $marginRight;
+        }
+        $qrCodeString .= $marginVertical;
+
+        return $qrCodeString;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/DebugResult.php
+Nume: DebugResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\Matrix\MatrixInterface;
+use Endroid\QrCode\QrCodeInterface;
+
+final class DebugResult extends AbstractResult
+{
+    private bool $validateResult = false;
+
+    public function __construct(
+        MatrixInterface $matrix,
+        private readonly QrCodeInterface $qrCode,
+        private readonly ?LogoInterface $logo = null,
+        private readonly ?LabelInterface $label = null,
+        /** @var array<string, mixed> $options */
+        private readonly array $options = [],
+    ) {
+        parent::__construct($matrix);
+    }
+
+    public function setValidateResult(bool $validateResult): void
+    {
+        $this->validateResult = $validateResult;
+    }
+
+    public function getString(): string
+    {
+        $debugLines = [];
+
+        $debugLines[] = 'Data: '.$this->qrCode->getData();
+        $debugLines[] = 'Encoding: '.$this->qrCode->getEncoding();
+        $debugLines[] = 'Error Correction Level: '.get_class($this->qrCode->getErrorCorrectionLevel());
+        $debugLines[] = 'Size: '.$this->qrCode->getSize();
+        $debugLines[] = 'Margin: '.$this->qrCode->getMargin();
+        $debugLines[] = 'Round block size mode: '.get_class($this->qrCode->getRoundBlockSizeMode());
+        $debugLines[] = 'Foreground color: ['.implode(', ', $this->qrCode->getForegroundColor()->toArray()).']';
+        $debugLines[] = 'Background color: ['.implode(', ', $this->qrCode->getBackgroundColor()->toArray()).']';
+
+        foreach ($this->options as $key => $value) {
+            $debugLines[] = 'Writer option: '.$key.': '.$value;
+        }
+
+        if (isset($this->logo)) {
+            $debugLines[] = 'Logo path: '.$this->logo->getPath();
+            $debugLines[] = 'Logo resize to width: '.$this->logo->getResizeToWidth();
+            $debugLines[] = 'Logo resize to height: '.$this->logo->getResizeToHeight();
+            $debugLines[] = 'Logo punchout background: '.($this->logo->getPunchoutBackground() ? 'true' : 'false');
+        }
+
+        if (isset($this->label)) {
+            $debugLines[] = 'Label text: '.$this->label->getText();
+            $debugLines[] = 'Label font path: '.$this->label->getFont()->getPath();
+            $debugLines[] = 'Label font size: '.$this->label->getFont()->getSize();
+            $debugLines[] = 'Label alignment: '.get_class($this->label->getAlignment());
+            $debugLines[] = 'Label margin: ['.implode(', ', $this->label->getMargin()->toArray()).']';
+            $debugLines[] = 'Label text color: ['.implode(', ', $this->label->getTextColor()->toArray()).']';
+        }
+
+        $debugLines[] = 'Validate result: '.($this->validateResult ? 'true' : 'false');
+
+        return implode("\n", $debugLines);
+    }
+
+    public function getMimeType(): string
+    {
+        return 'text/plain';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/EpsResult.php
+Nume: EpsResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class EpsResult extends AbstractResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        /** @var array<string> $lines */
+        private readonly array $lines,
+    ) {
+        parent::__construct($matrix);
+    }
+
+    public function getString(): string
+    {
+        return implode("\n", $this->lines);
+    }
+
+    public function getMimeType(): string
+    {
+        return 'image/eps';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/GdResult.php
+Nume: GdResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+class GdResult extends AbstractResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        protected readonly \GdImage $image,
+    ) {
+        parent::__construct($matrix);
+    }
+
+    public function getImage(): \GdImage
+    {
+        return $this->image;
+    }
+
+    public function getString(): string
+    {
+        throw new \Exception('You can only use this method in a concrete implementation');
+    }
+
+    public function getMimeType(): string
+    {
+        throw new \Exception('You can only use this method in a concrete implementation');
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/GifResult.php
+Nume: GifResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+final class GifResult extends GdResult
+{
+    public function getString(): string
+    {
+        ob_start();
+        imagegif($this->image);
+
+        return strval(ob_get_clean());
+    }
+
+    public function getMimeType(): string
+    {
+        return 'image/gif';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/PdfResult.php
+Nume: PdfResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class PdfResult extends AbstractResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        private readonly \FPDF $fpdf,
+    ) {
+        parent::__construct($matrix);
+    }
+
+    public function getPdf(): \FPDF
+    {
+        return $this->fpdf;
+    }
+
+    public function getString(): string
+    {
+        return $this->fpdf->Output('S');
+    }
+
+    public function getMimeType(): string
+    {
+        return 'application/pdf';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/PngResult.php
+Nume: PngResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class PngResult extends GdResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        \GdImage $image,
+        private readonly int $quality = -1,
+    ) {
+        parent::__construct($matrix, $image);
+    }
+
+    public function getString(): string
+    {
+        ob_start();
+        imagepng($this->image, quality: $this->quality);
+
+        return strval(ob_get_clean());
+    }
+
+    public function getMimeType(): string
+    {
+        return 'image/png';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/ResultInterface.php
+Nume: ResultInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+interface ResultInterface
+{
+    public function getMatrix(): MatrixInterface;
+
+    public function getString(): string;
+
+    public function getDataUri(): string;
+
+    public function saveToFile(string $path): void;
+
+    public function getMimeType(): string;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/SvgResult.php
+Nume: SvgResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class SvgResult extends AbstractResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        private readonly \SimpleXMLElement $xml,
+        private readonly bool $excludeXmlDeclaration = false,
+    ) {
+        parent::__construct($matrix);
+    }
+
+    public function getXml(): \SimpleXMLElement
+    {
+        return $this->xml;
+    }
+
+    public function getString(): string
+    {
+        $string = $this->xml->asXML();
+
+        if (!is_string($string)) {
+            throw new \Exception('Could not save SVG XML to string');
+        }
+
+        if ($this->excludeXmlDeclaration) {
+            $string = str_replace("<?xml version=\"1.0\"?>\n", '', $string);
+        }
+
+        return $string;
+    }
+
+    public function getMimeType(): string
+    {
+        return 'image/svg+xml';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/Result/WebPResult.php
+Nume: WebPResult.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer\Result;
+
+use Endroid\QrCode\Matrix\MatrixInterface;
+
+final class WebPResult extends GdResult
+{
+    public function __construct(
+        MatrixInterface $matrix,
+        \GdImage $image,
+        private readonly int $quality = -1,
+    ) {
+        parent::__construct($matrix, $image);
+    }
+
+    public function getString(): string
+    {
+        if (!function_exists('imagewebp')) {
+            throw new \Exception('WebP support is not available in your GD installation');
+        }
+
+        ob_start();
+        imagewebp($this->image, quality: $this->quality);
+
+        return strval(ob_get_clean());
+    }
+
+    public function getMimeType(): string
+    {
+        return 'image/webp';
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/SvgWriter.php
+Nume: SvgWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Bacon\MatrixFactory;
+use Endroid\QrCode\ImageData\LogoImageData;
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\Matrix\MatrixInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Endroid\QrCode\Writer\Result\SvgResult;
+
+final readonly class SvgWriter implements WriterInterface
+{
+    public const DECIMAL_PRECISION = 2;
+    public const WRITER_OPTION_COMPACT = 'compact';
+    public const WRITER_OPTION_BLOCK_ID = 'block_id';
+    public const WRITER_OPTION_EXCLUDE_XML_DECLARATION = 'exclude_xml_declaration';
+    public const WRITER_OPTION_EXCLUDE_SVG_WIDTH_AND_HEIGHT = 'exclude_svg_width_and_height';
+    public const WRITER_OPTION_FORCE_XLINK_HREF = 'force_xlink_href';
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        if (!isset($options[self::WRITER_OPTION_COMPACT])) {
+            $options[self::WRITER_OPTION_COMPACT] = true;
+        }
+
+        if (!isset($options[self::WRITER_OPTION_BLOCK_ID])) {
+            $options[self::WRITER_OPTION_BLOCK_ID] = 'block';
+        }
+
+        if (!isset($options[self::WRITER_OPTION_EXCLUDE_XML_DECLARATION])) {
+            $options[self::WRITER_OPTION_EXCLUDE_XML_DECLARATION] = false;
+        }
+
+        if (!isset($options[self::WRITER_OPTION_EXCLUDE_SVG_WIDTH_AND_HEIGHT])) {
+            $options[self::WRITER_OPTION_EXCLUDE_SVG_WIDTH_AND_HEIGHT] = false;
+        }
+
+        $matrixFactory = new MatrixFactory();
+        $matrix = $matrixFactory->create($qrCode);
+
+        $xml = new \SimpleXMLElement('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"/>');
+        $xml->addAttribute('version', '1.1');
+        if (!$options[self::WRITER_OPTION_EXCLUDE_SVG_WIDTH_AND_HEIGHT]) {
+            $xml->addAttribute('width', $matrix->getOuterSize().'px');
+            $xml->addAttribute('height', $matrix->getOuterSize().'px');
+        }
+        $xml->addAttribute('viewBox', '0 0 '.$matrix->getOuterSize().' '.$matrix->getOuterSize());
+
+        $background = $xml->addChild('rect');
+        $background->addAttribute('x', '0');
+        $background->addAttribute('y', '0');
+        $background->addAttribute('width', strval($matrix->getOuterSize()));
+        $background->addAttribute('height', strval($matrix->getOuterSize()));
+        $background->addAttribute('fill', '#'.sprintf('%02x%02x%02x', $qrCode->getBackgroundColor()->getRed(), $qrCode->getBackgroundColor()->getGreen(), $qrCode->getBackgroundColor()->getBlue()));
+        $background->addAttribute('fill-opacity', strval($qrCode->getBackgroundColor()->getOpacity()));
+
+        if ($options[self::WRITER_OPTION_COMPACT]) {
+            $this->writePath($xml, $qrCode, $matrix);
+        } else {
+            $this->writeBlockDefinitions($xml, $qrCode, $matrix, $options);
+        }
+
+        $result = new SvgResult($matrix, $xml, boolval($options[self::WRITER_OPTION_EXCLUDE_XML_DECLARATION]));
+
+        if ($logo instanceof LogoInterface) {
+            $this->addLogo($logo, $result, $options);
+        }
+
+        return $result;
+    }
+
+    private function writePath(\SimpleXMLElement $xml, QrCodeInterface $qrCode, MatrixInterface $matrix): void
+    {
+        $path = '';
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            $left = $matrix->getMarginLeft();
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                if (1 === $matrix->getBlockValue($rowIndex, $columnIndex)) {
+                    // When we are at the first column or when the previous column was 0 set new left
+                    if (0 === $columnIndex || 0 === $matrix->getBlockValue($rowIndex, $columnIndex - 1)) {
+                        $left = $matrix->getMarginLeft() + $matrix->getBlockSize() * $columnIndex;
+                    }
+                    // When we are at the
+                    if ($columnIndex === $matrix->getBlockCount() - 1 || 0 === $matrix->getBlockValue($rowIndex, $columnIndex + 1)) {
+                        $top = $matrix->getMarginLeft() + $matrix->getBlockSize() * $rowIndex;
+                        $bottom = $matrix->getMarginLeft() + $matrix->getBlockSize() * ($rowIndex + 1);
+                        $right = $matrix->getMarginLeft() + $matrix->getBlockSize() * ($columnIndex + 1);
+                        $path .= 'M'.$this->formatNumber($left).','.$this->formatNumber($top);
+                        $path .= 'L'.$this->formatNumber($right).','.$this->formatNumber($top);
+                        $path .= 'L'.$this->formatNumber($right).','.$this->formatNumber($bottom);
+                        $path .= 'L'.$this->formatNumber($left).','.$this->formatNumber($bottom).'Z';
+                    }
+                }
+            }
+        }
+
+        $pathDefinition = $xml->addChild('path');
+        $pathDefinition->addAttribute('fill', '#'.sprintf('%02x%02x%02x', $qrCode->getForegroundColor()->getRed(), $qrCode->getForegroundColor()->getGreen(), $qrCode->getForegroundColor()->getBlue()));
+        $pathDefinition->addAttribute('fill-opacity', strval($qrCode->getForegroundColor()->getOpacity()));
+        $pathDefinition->addAttribute('d', $path);
+    }
+
+    /** @param array<string, mixed> $options */
+    private function writeBlockDefinitions(\SimpleXMLElement $xml, QrCodeInterface $qrCode, MatrixInterface $matrix, array $options): void
+    {
+        $xml->addChild('defs');
+
+        $blockDefinition = $xml->defs->addChild('rect');
+        $blockDefinition->addAttribute('id', strval($options[self::WRITER_OPTION_BLOCK_ID]));
+        $blockDefinition->addAttribute('width', $this->formatNumber($matrix->getBlockSize()));
+        $blockDefinition->addAttribute('height', $this->formatNumber($matrix->getBlockSize()));
+        $blockDefinition->addAttribute('fill', '#'.sprintf('%02x%02x%02x', $qrCode->getForegroundColor()->getRed(), $qrCode->getForegroundColor()->getGreen(), $qrCode->getForegroundColor()->getBlue()));
+        $blockDefinition->addAttribute('fill-opacity', strval($qrCode->getForegroundColor()->getOpacity()));
+
+        for ($rowIndex = 0; $rowIndex < $matrix->getBlockCount(); ++$rowIndex) {
+            for ($columnIndex = 0; $columnIndex < $matrix->getBlockCount(); ++$columnIndex) {
+                if (1 === $matrix->getBlockValue($rowIndex, $columnIndex)) {
+                    $block = $xml->addChild('use');
+                    $block->addAttribute('x', $this->formatNumber($matrix->getMarginLeft() + $matrix->getBlockSize() * $columnIndex));
+                    $block->addAttribute('y', $this->formatNumber($matrix->getMarginLeft() + $matrix->getBlockSize() * $rowIndex));
+                    $block->addAttribute('xlink:href', '#'.$options[self::WRITER_OPTION_BLOCK_ID], 'http://www.w3.org/1999/xlink');
+                }
+            }
+        }
+    }
+
+    /** @param array<string, mixed> $options */
+    private function addLogo(LogoInterface $logo, SvgResult $result, array $options): void
+    {
+        $logoImageData = LogoImageData::createForLogo($logo);
+
+        if (!isset($options[self::WRITER_OPTION_FORCE_XLINK_HREF])) {
+            $options[self::WRITER_OPTION_FORCE_XLINK_HREF] = false;
+        }
+
+        $xml = $result->getXml();
+
+        /** @var \SimpleXMLElement $xmlAttributes */
+        $xmlAttributes = $xml->attributes();
+
+        $x = intval($xmlAttributes->width) / 2 - $logoImageData->getWidth() / 2;
+        $y = intval($xmlAttributes->height) / 2 - $logoImageData->getHeight() / 2;
+
+        $imageDefinition = $xml->addChild('image');
+        $imageDefinition->addAttribute('x', strval($x));
+        $imageDefinition->addAttribute('y', strval($y));
+        $imageDefinition->addAttribute('width', strval($logoImageData->getWidth()));
+        $imageDefinition->addAttribute('height', strval($logoImageData->getHeight()));
+        $imageDefinition->addAttribute('preserveAspectRatio', 'none');
+
+        if ($options[self::WRITER_OPTION_FORCE_XLINK_HREF]) {
+            $imageDefinition->addAttribute('xlink:href', $logoImageData->createDataUri(), 'http://www.w3.org/1999/xlink');
+        } else {
+            $imageDefinition->addAttribute('href', $logoImageData->createDataUri());
+        }
+    }
+
+    private function formatNumber(float $number): string
+    {
+        $string = number_format($number, self::DECIMAL_PRECISION, '.', '');
+        $string = rtrim($string, '0');
+
+        return rtrim($string, '.');
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/ValidatingWriterInterface.php
+Nume: ValidatingWriterInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+interface ValidatingWriterInterface
+{
+    public function validateResult(ResultInterface $result, string $expectedData): void;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/WebPWriter.php
+Nume: WebPWriter.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\GdResult;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Endroid\QrCode\Writer\Result\WebPResult;
+
+final readonly class WebPWriter extends AbstractGdWriter
+{
+    public const WRITER_OPTION_QUALITY = 'quality';
+
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface
+    {
+        if (!isset($options[self::WRITER_OPTION_QUALITY])) {
+            $options[self::WRITER_OPTION_QUALITY] = -1;
+        }
+
+        /** @var GdResult $gdResult */
+        $gdResult = parent::write($qrCode, $logo, $label, $options);
+
+        return new WebPResult($gdResult->getMatrix(), $gdResult->getImage(), $options[self::WRITER_OPTION_QUALITY]);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code/src/Writer/WriterInterface.php
+Nume: WriterInterface.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCode\Writer;
+
+use Endroid\QrCode\Label\LabelInterface;
+use Endroid\QrCode\Logo\LogoInterface;
+use Endroid\QrCode\QrCodeInterface;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+
+interface WriterInterface
+{
+    /** @param array<string, mixed> $options */
+    public function write(QrCodeInterface $qrCode, ?LogoInterface $logo = null, ?LabelInterface $label = null, array $options = []): ResultInterface;
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/.install/symfony/config/packages/endroid_qr_code.yaml
+Nume: endroid_qr_code.yaml
+Continut:
+endroid_qr_code:
+    default:
+        writer: Endroid\QrCode\Writer\PngWriter
+        size: 300
+        margin: 10
+        encoding: 'UTF-8'
+        error_correction_level: 'low'
+        round_block_size_mode: 'margin'
+        validate_result: false
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/.install/symfony/config/routes/endroid_qr_code.yaml
+Nume: endroid_qr_code.yaml
+Continut:
+endroid_qr_code:
+    resource: "@EndroidQrCodeBundle/Resources/config/routes.yaml"
+    prefix: /qr-code
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/LICENSE
+Nume: LICENSE
+Continut:
+Copyright 2024 (c) Jeroen van den Enden
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished
+to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/README.md
+Nume: README.md
+Continut:
+# QR Code Bundle
+
+*By [endroid](https://endroid.nl/)*
+
+[![Latest Stable Version](http://img.shields.io/packagist/v/endroid/qr-code-bundle.svg)](https://packagist.org/packages/endroid/qr-code-bundle)
+[![Build Status](https://github.com/endroid/qr-code-bundle/workflows/CI/badge.svg)](https://github.com/endroid/qr-code-bundle/actions)
+[![Total Downloads](http://img.shields.io/packagist/dt/endroid/qr-code-bundle.svg)](https://packagist.org/packages/endroid/qr-code-bundle)
+[![Monthly Downloads](http://img.shields.io/packagist/dm/endroid/qr-code-bundle.svg)](https://packagist.org/packages/endroid/qr-code-bundle)
+[![License](http://img.shields.io/packagist/l/endroid/qr-code-bundle.svg)](https://packagist.org/packages/endroid/qr-code-bundle)
+
+This Symfony bundle lets you generate QR Codes using the [endroid/qr-code](https://github.com/endroid/QrCode)
+library. It provides the following features:
+
+* Configure your defaults (like image size, default writer etc.)
+* Support for multiple configurations and injection via aliases
+* Generate QR codes for defined configurations via URL like /qr-code/<config>/Hello
+* Generate QR codes or URLs directly from Twig using dedicated functions
+
+## Installation
+
+Use [Composer](https://getcomposer.org/) to install the library. Also make sure you have enabled and configured the
+[GD extension](https://www.php.net/manual/en/book.image.php) if you want to generate images.
+
+``` bash
+composer require endroid/qr-code-bundle
+```
+
+When you use Symfony, the [installer](https://github.com/endroid/installer)
+makes sure that services are automatically wired. If this is not the case you
+can find the configuration files in the `.install/symfony` folder.
+
+If you don't want the installer to create the auto-configuration files, it can
+be disabled as described [here](https://github.com/endroid/installer#configuration).
+
+## Configuration
+
+The bundle makes use of builders to create QR codes. The default parameters
+applied by the builder can optionally be overridden via the configuration. and
+multiple configurations (thus builders) can be defined.
+
+```yaml
+endroid_qr_code:
+    default:
+        writer: Endroid\QrCode\Writer\PngWriter
+        data: 'This is customized QR code'
+        # Label is not implemented for SvgWriter
+        label_text: 'This is the label'
+        label_font_path: '%kernel.project_dir%/vendor/endroid/qr-code/assets/noto_sans.otf'
+        label_font_size: 20
+        label_alignment: 'center'
+    custom:
+        writer: Endroid\QrCode\Writer\SvgWriter
+        writer_options:
+            exclude_xml_declaration: true # default: false
+        data: 'This is customized QR code'
+        size: 300
+        encoding: 'UTF-8'
+        error_correction_level: 'low' # 'low', 'medium', 'quartile', or 'high'
+        round_block_size_mode: 'margin'
+        logo_path: '%kernel.project_dir%/vendor/endroid/qr-code/tests/assets/symfony.png'
+        logo_resize_to_width: 150
+        logo_punchout_background: true
+        validate_result: false
+```
+
+## Using builders
+
+Each configuration results in a builder which can be injected in your classes.
+For instance the custom builder from the example above can be injected like this
+and you can override the default configuration as follows.
+
+```php
+use Endroid\QrCode\Builder\BuilderInterface;
+
+public function __construct(BuilderInterface $customQrCodeBuilder)
+{
+    $result = $customQrCodeBuilder
+        ->size(400)
+        ->margin(20)
+        ->build();
+}
+```
+
+## QR Code Response
+
+The bundle also provides a response object to ease rendering of the resulting
+image by automatically saving to contents and setting the correct content type.
+
+```php
+use Endroid\QrCodeBundle\Response\QrCodeResponse;
+
+$response = new QrCodeResponse($result);
+```
+
+## Generate via URL
+
+The bundle provides a controller that allows you to generate QR codes simply
+by opening an URL like /qr-code/{builder}/{data}. You can configure the prefix
+in your routing file and pass any of the existing options via query string.
+
+## Generate via Twig
+
+The bundle provides a Twig extension for generating a QR code URL, path or data
+URI. You can use the second argument to specify the builder to use.
+
+```twig
+<img src="{{ qr_code_path('My QR Code') }}" />
+<img src="{{ qr_code_url('My QR Code') }}" />
+<img src="{{ qr_code_data_uri('My QR Code') }}" />
+
+{# You can specify the builder via the second parameter #}
+<img src="{{ qr_code_data_uri('My QR Code', 'custom') }}" />
+
+{# You can access the width and height via the matrix #}
+{% set qrCode = qr_code_result('My QR Code') %}
+<img src="{{ qrCode.dataUri }}" width="{{ qrCode.matrix.outerSize }}" />
+```
+    
+## Versioning
+
+Version numbers follow the MAJOR.MINOR.PATCH scheme. Backwards compatibility
+breaking changes will be kept to a minimum but be aware that these can occur.
+Lock your dependencies for production and test your code when upgrading.
+
+## License
+
+This source code is subject to the MIT license bundled in the file LICENSE.
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/composer.json
+Nume: composer.json
+Continut:
+{
+    "name": "endroid/qr-code-bundle",
+    "description": "Endroid QR Code Bundle",
+    "keywords": ["endroid", "qr", "code", "symfony", "bundle", "php"],
+    "homepage": "https://github.com/endroid/qr-code-bundle",
+    "type": "symfony-bundle",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jeroen van den Enden",
+            "email": "info@endroid.nl"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "endroid/installer": "^1.2.2",
+        "endroid/qr-code": "^6.0.1",
+        "symfony/framework-bundle": "^5.4||^6.4||^7.0",
+        "symfony/twig-bundle": "^5.4||^6.4||^7.0",
+        "symfony/yaml": "^5.4||^6.4||^7.0"
+    },
+    "require-dev": {
+        "endroid/quality": "dev-main"
+    },
+    "suggest": {
+        "roave/security-advisories": "Avoids installation of package versions with vulnerabilities"
+    },
+    "autoload": {
+        "psr-4": {
+            "Endroid\\QrCodeBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Endroid\\QrCodeBundle\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "6.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "endroid/installer": true
+        }
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Controller/GenerateController.php
+Nume: GenerateController.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\Controller;
+
+use Endroid\QrCode\Builder\Builder;
+use Endroid\QrCode\Builder\BuilderRegistryInterface;
+use Endroid\QrCodeBundle\Response\QrCodeResponse;
+use Symfony\Component\HttpFoundation\Response;
+
+final readonly class GenerateController
+{
+    public function __construct(
+        private BuilderRegistryInterface $builderRegistry,
+    ) {
+    }
+
+    public function __invoke(string $builder, string $data): Response
+    {
+        $builder = $this->builderRegistry->get($builder);
+
+        if (!$builder instanceof Builder) {
+            throw new \Exception('This controller only handles Builder instances');
+        }
+
+        return new QrCodeResponse($builder->build(data: $data));
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/DependencyInjection/Configuration.php
+Nume: Configuration.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\DependencyInjection;
+
+use Symfony\Component\Config\Definition\Builder\ArrayNodeDefinition;
+use Symfony\Component\Config\Definition\Builder\TreeBuilder;
+use Symfony\Component\Config\Definition\ConfigurationInterface;
+
+final readonly class Configuration implements ConfigurationInterface
+{
+    public function getConfigTreeBuilder(): TreeBuilder
+    {
+        $treeBuilder = new TreeBuilder('endroid_qr_code');
+
+        /** @var ArrayNodeDefinition $rootNode */
+        $rootNode = $treeBuilder->getRootNode();
+
+        $rootNode
+            ->beforeNormalization()
+                ->ifTrue(fn (array $config) => !$this->hasMultipleConfigurations($config))
+                ->then(fn (array $value) => ['default' => $value]);
+
+        $rootNode->useAttributeAsKey('name');
+        $rootNode->prototype('array');
+        $rootNode->prototype('variable');
+
+        return $treeBuilder;
+    }
+
+    /** @param array<string, mixed> $config */
+    private function hasMultipleConfigurations(array $config): bool
+    {
+        foreach ($config as $value) {
+            if (!is_array($value)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/DependencyInjection/EndroidQrCodeExtension.php
+Nume: EndroidQrCodeExtension.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\DependencyInjection;
+
+use Endroid\QrCode\Builder\BuilderInterface;
+use Endroid\QrCode\Builder\BuilderRegistryInterface;
+use Endroid\QrCode\Color\Color;
+use Endroid\QrCode\Encoding\Encoding;
+use Endroid\QrCode\ErrorCorrectionLevel;
+use Endroid\QrCode\Label\Font\Font;
+use Endroid\QrCode\Label\Font\OpenSans;
+use Endroid\QrCode\Label\LabelAlignment;
+use Endroid\QrCode\RoundBlockSizeMode;
+use Symfony\Component\Config\Definition\ConfigurationInterface;
+use Symfony\Component\Config\FileLocator;
+use Symfony\Component\DependencyInjection\ChildDefinition;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
+use Symfony\Component\DependencyInjection\Extension\Extension;
+use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
+use Symfony\Component\DependencyInjection\Reference;
+
+final class EndroidQrCodeExtension extends Extension
+{
+    /**
+     * @param array<string, mixed> $configs
+     */
+    public function load(array $configs, ContainerBuilder $container): void
+    {
+        $configuration = $this->getConfiguration($configs, $container);
+
+        if (!$configuration instanceof ConfigurationInterface) {
+            throw new \Exception('Configuration not found');
+        }
+
+        $config = $this->processConfiguration($configuration, $configs);
+
+        $loader = new YamlFileLoader($container, new FileLocator(__DIR__.'/../Resources/config'));
+        $loader->load('services.yaml');
+
+        $registryDefinition = $container->findDefinition(BuilderRegistryInterface::class);
+
+        foreach ($config as $builderName => $builderConfig) {
+            $builderDefinition = $this->createBuilderDefinition($builderName, $builderConfig, $container);
+            $registryDefinition->addMethodCall('set', [$builderName, $builderDefinition]);
+        }
+    }
+
+    /** @param array<mixed> $builderConfig */
+    private function createBuilderDefinition(string $builderName, array $builderConfig, ContainerBuilder $container): Definition
+    {
+        $id = sprintf('endroid_qr_code.%s_builder', $builderName);
+
+        $builderDefinition = new ChildDefinition(BuilderInterface::class);
+
+        $arguments = [];
+        foreach ($builderConfig as $name => $value) {
+            $name = $this->toCamelCase($name);
+            switch ($name) {
+                case 'writer':
+                    $arguments[$name] = new Reference($value);
+                    break;
+                case 'encoding':
+                    $arguments[$name] = new Definition(Encoding::class, [$value]);
+                    break;
+                case 'errorCorrectionLevel':
+                    $arguments[$name] = ErrorCorrectionLevel::from($value);
+                    break;
+                case 'roundBlockSizeMode':
+                    $arguments[$name] = RoundBlockSizeMode::from($value);
+                    break;
+                case 'foregroundColor':
+                case 'backgroundColor':
+                case 'labelTextColor':
+                    $arguments[$name] = new Definition(Color::class, $value);
+                    break;
+                case 'labelFontPath':
+                    $labelFontSize = $builderConfig['labelFontSize'] ?? 16;
+                    $arguments['labelFont'] = new Definition(Font::class, [$value, $labelFontSize]);
+                    break;
+                case 'labelFontSize':
+                    $labelFontPath = $builderConfig['labelFontPath'] ?? (new OpenSans())->getPath();
+                    $arguments['labelFont'] = new Definition(Font::class, [$labelFontPath, $value]);
+                    break;
+                case 'labelAlignment':
+                    $arguments[$name] = LabelAlignment::from($value);
+                    break;
+                default:
+                    $arguments[$name] = $value;
+                    break;
+            }
+        }
+
+        foreach ($arguments as $name => $value) {
+            $builderDefinition->setArgument('$'.$name, $value);
+        }
+
+        $container->setDefinition($id, $builderDefinition);
+
+        if (method_exists($container, 'registerAliasForArgument')) {
+            $container->registerAliasForArgument($id, BuilderInterface::class, $builderName.'QrCodeBuilder')->setPublic(false);
+        }
+
+        return $builderDefinition;
+    }
+
+    private function toCamelCase(string $anyCase): string
+    {
+        return lcfirst(str_replace(' ', '', ucwords(str_replace('_', ' ', $anyCase))));
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/EndroidQrCodeBundle.php
+Nume: EndroidQrCodeBundle.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle;
+
+use Symfony\Component\HttpKernel\Bundle\Bundle;
+
+final class EndroidQrCodeBundle extends Bundle
+{
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Resources/config/routes.yaml
+Nume: routes.yaml
+Continut:
+qr_code_generate:
+    path: /{builder}/{data}
+    requirements:
+        data: "[\\w\\W]+"
+    defaults:
+        _controller: Endroid\QrCodeBundle\Controller\GenerateController
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Resources/config/services.yaml
+Nume: services.yaml
+Continut:
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    Endroid\QrCodeBundle\Controller\:
+        resource: '../../Controller'
+        tags: ['controller.service_arguments']
+
+    Endroid\QrCode\Writer\BinaryWriter: ~
+    Endroid\QrCode\Writer\DebugWriter: ~
+    Endroid\QrCode\Writer\EpsWriter: ~
+    Endroid\QrCode\Writer\GifWriter: ~
+    Endroid\QrCode\Writer\PdfWriter: ~
+    Endroid\QrCode\Writer\PngWriter: ~
+    Endroid\QrCode\Writer\SvgWriter: ~
+    Endroid\QrCode\Writer\WebPWriter: ~
+
+    Endroid\QrCode\Builder\Builder: ~
+    Endroid\QrCode\Builder\BuilderInterface: '@Endroid\QrCode\Builder\Builder'
+
+    Endroid\QrCode\Builder\BuilderRegistry: ~
+    Endroid\QrCode\Builder\BuilderRegistryInterface: '@Endroid\QrCode\Builder\BuilderRegistry'
+
+    Endroid\QrCodeBundle\Twig\QrCodeExtension: ~
+    Endroid\QrCodeBundle\Twig\QrCodeRuntime: ~
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Response/QrCodeResponse.php
+Nume: QrCodeResponse.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\Response;
+
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Symfony\Component\HttpFoundation\Response;
+
+final class QrCodeResponse extends Response
+{
+    public function __construct(ResultInterface $result)
+    {
+        parent::__construct($result->getString(), Response::HTTP_OK, ['Content-Type' => $result->getMimeType()]);
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Twig/QrCodeExtension.php
+Nume: QrCodeExtension.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\Twig;
+
+use Twig\Extension\AbstractExtension;
+use Twig\TwigFunction;
+
+final class QrCodeExtension extends AbstractExtension
+{
+    public function getFunctions(): array
+    {
+        return [
+            new TwigFunction('qr_code_path', [QrCodeRuntime::class, 'qrCodePathFunction']),
+            new TwigFunction('qr_code_url', [QrCodeRuntime::class, 'qrCodeUrlFunction']),
+            new TwigFunction('qr_code_data_uri', [QrCodeRuntime::class, 'qrCodeDataUriFunction']),
+            new TwigFunction('qr_code_result', [QrCodeRuntime::class, 'qrCodeResultFunction']),
+        ];
+    }
+}
+
+-------------------------------------
+Cale: vendor/endroid//qr-code-bundle/src/Twig/QrCodeRuntime.php
+Nume: QrCodeRuntime.php
+Continut:
+<?php
+
+declare(strict_types=1);
+
+namespace Endroid\QrCodeBundle\Twig;
+
+use Endroid\QrCode\Builder\Builder;
+use Endroid\QrCode\Builder\BuilderRegistryInterface;
+use Endroid\QrCode\Writer\Result\ResultInterface;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Twig\Extension\RuntimeExtensionInterface;
+
+final readonly class QrCodeRuntime implements RuntimeExtensionInterface
+{
+    public function __construct(
+        private BuilderRegistryInterface $builderRegistry,
+        private UrlGeneratorInterface $urlGenerator,
+    ) {
+    }
+
+    public function qrCodeUrlFunction(string $data, string $builder = 'default'): string
+    {
+        return $this->getQrCodeReference($data, $builder, UrlGeneratorInterface::ABSOLUTE_URL);
+    }
+
+    public function qrCodePathFunction(string $data, string $builder = 'default'): string
+    {
+        return $this->getQrCodeReference($data, $builder, UrlGeneratorInterface::ABSOLUTE_PATH);
+    }
+
+    public function getQrCodeReference(string $data, string $builder, int $referenceType): string
+    {
+        $options = ['data' => $data, 'builder' => $builder];
+
+        return $this->urlGenerator->generate('qr_code_generate', $options, $referenceType);
+    }
+
+    /** @param array<mixed> $options */
+    public function qrCodeDataUriFunction(string $data, string $builder = 'default', array $options = []): string
+    {
+        $result = $this->qrCodeResultFunction($data, $builder, $options);
+
+        return $result->getDataUri();
+    }
+
+    /** @param array<mixed> $options */
+    public function qrCodeResultFunction(string $data, string $builder = 'default', array $options = []): ResultInterface
+    {
+        $builder = $this->builderRegistry->get($builder);
+
+        if (!$builder instanceof Builder) {
+            throw new \Exception('This twig extension only handles Builder instances');
+        }
+
+        $options['data'] = $data;
+
+        return $builder->build(...$options);
+    }
+}
+
+-------------------------------------

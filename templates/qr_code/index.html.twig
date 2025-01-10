@@ -1,0 +1,46 @@
+{# templates/qr_code/index.html.twig #}
+{% extends 'base.html.twig' %}
+
+{% block title %}QR Code Generator{% endblock %}
+
+{% block body %}
+    <h1>QR Code Generator</h1>
+
+    <form method="post">
+        <label for="firstName">First Name:</label>
+        <input type="text" id="firstName" name="firstName" required><br><br>
+
+        <label for="lastName">Last Name:</label>
+        <input type="text" id="lastName" name="lastName" required><br><br>
+
+        <label for="phone">Phone:</label>
+        <input type="tel" id="phone" name="phone" required><br><br>
+
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required><br><br>
+
+        <label for="address">Address:</label>
+        <input type="text" id="address" name="address" required><br><br>
+
+        <label for="url">URL:</label>
+        <input type="url" id="url" name="url" required><br><br>
+
+         <label for="social1">Social Link 1:</label>
+        <input type="url" id="social1" name="social1"><br><br>
+
+        <label for="social2">Social Link 2:</label>
+        <input type="url" id="social2" name="social2"><br><br>
+
+        <label for="social3">Social Link 3:</label>
+        <input type="url" id="social3" name="social3"><br><br>
+
+
+
+        <button type="submit">Generate QR Code</button>
+    </form>
+
+    {% if qr_code %}
+        <h2>Your QR Code:</h2>
+        <img src="{{ qr_code }}" alt="QR Code">
+    {% endif %}
+{% endblock %}
