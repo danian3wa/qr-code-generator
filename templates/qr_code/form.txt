@@ -1,0 +1,118 @@
+{% extends 'base.html.twig' %}
+
+{% block body %}
+    <h1>QR Code Generator</h1>
+
+    <form id="qr-code-form" method="post" action="{{ path('app_qr_code_generate') }}">
+        <label for="firstName">First Name:</label><br>
+        <input type="text" id="firstName" name="firstName" required><br><br>
+
+        <label for="lastName">Last Name:</label><br>
+        <input type="text" id="lastName" name="lastName" required><br><br>
+
+        <label for="companyName">Company Name:</label><br>
+        <input type="text" id="companyName" name="companyName"><br><br> 
+
+        <label for="phone">Phone:</label><br>
+        <input type="tel" id="phone" name="phone" required><br><br>
+
+        <label for="email">Email:</label><br>
+        <input type="email" id="email" name="email" required><br><br>
+
+        <label for="street">Street:</label><br>
+        <input type="text" id="street" name="street" ><br><br>
+
+        <label for="number">Number:</label><br>
+        <input type="text" id="number" name="number" ><br><br>
+
+        <label for="city">City:</label><br>
+        <input type="text" id="city" name="city" ><br><br>
+
+        <label for="postalCode">Postal Code:</label><br>
+        <input type="text" id="postalCode" name="postalCode" ><br><br>
+
+        <label for="county">County:</label><br>
+        <input type="text" id="county" name="county" ><br><br>
+
+        <label for="country">Country:</label><br>
+        <input type="text" id="country" name="country" ><br><br>
+
+        <label for="url">URL:</label>
+        <input type="url" id="url" name="url" ><br><br>
+    
+         <label for="social1">Social You Tube:</label>
+         <input type="url" id="social1" name="social1"><br><br>
+
+        <label for="social2">Social LinkedIn:</label>
+       <input type="url" id="social2" name="social2"><br><br>
+
+       <label for="social3">Social Instagram:</label>
+       <input type="url" id="social3" name="social3"><br><br>
+
+       <label for="social4">Social Facebook:</label>
+       <input type="url" id="social4" name="social4"><br><br>
+
+       <label for="social5">Social X:</label>
+       <input type="url" id="social5" name="social5"><br><br>
+
+       <label for="social6">Social GitHub:</label>
+       <input type="url" id="social6" name="social6"><br><br>
+    
+        <input type="hidden" id="data" name="data">
+       <button type="submit">Generate QR Code</button>
+    </form>
+
+    <div id="qr-code-result"></div>
+
+    <script>
+       const form = document.getElementById('qr-code-form');
+      const resultDiv = document.getElementById('qr-code-result');
+       form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+             // Creează string-ul vCard
+            let contactData = "BEGIN:VCARD\r\nVERSION:3.0\r\n";
+            contactData += "N:" + form.lastName.value + ";" + form.firstName.value + ";;\r\n";
+            contactData += "ORG:" + form.companyName.value + "\r\n"; // Adaugă câmpul ORG
+            contactData += "Company:" + form.email.value + "\r\n";
+            contactData += "TEL;TYPE=CELL:" + form.phone.value + "\r\n";
+            contactData += "EMAIL:" + form.email.value + "\r\n";
+            contactData += "ADR;TYPE=WORK:" 
+              + form.street.value + ";" // Stradă
+              + form.number.value + ";" // Număr
+              + form.city.value + ";"    // Oraș
+              + form.postalCode.value + ";" // Cod poștal
+              + form.county.value + ";"   // Județ/Regiune
+              + form.country.value       // Țară
+              + "\r\n"
+            contactData += "URL:" + form.url.value + "\r\n";
+            if (form.social1.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=Youtube:" + form.social1.value + "\r\n";
+            }
+            if (form.social2.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=LinkedIn:" + form.social2.value + "\r\n";
+            }
+            if (form.social3.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=Instagram:" + form.social3.value + "\r\n";
+            }
+            if (form.social4.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=Facebook:" + form.social4.value + "\r\n";
+            }
+            if (form.social5.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=X:" + form.social5.value + "\r\n";
+            }
+            if (form.social6.value !== '') {
+              contactData += "X-SOCIALPROFILE;TYPE=GitHub:" + form.social6.value + "\r\n";
+            }
+            /*contactData += "NOTE:Youtube: " + form.social1.value + "\\nLinkedIn: " + form.social2.value + "\\nInstagram: " + form.social3.value + "\r\n";*/
+            contactData += "END:VCARD";
+
+            // Setează data în input-ul ascuns
+            document.getElementById('data').value = contactData;
+          form.submit();
+          console.log(contactData);
+          wait(2000);
+
+        });
+    </script>
+{% endblock %}

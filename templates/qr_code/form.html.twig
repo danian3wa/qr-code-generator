@@ -3,15 +3,15 @@
 {% block body %}
     <h1>QR Code Generator</h1>
 
-    <form id="qr-code-form" method="post" action="{{ path('app_qr_code_generate') }}">
-        <label for="firstName">First Name:</label><br>
+    <form id="qr-code-form" method="post">
+         <label for="firstName">First Name:</label><br>
         <input type="text" id="firstName" name="firstName" required><br><br>
 
         <label for="lastName">Last Name:</label><br>
         <input type="text" id="lastName" name="lastName" required><br><br>
 
         <label for="companyName">Company Name:</label><br>
-        <input type="text" id="companyName" name="companyName"><br><br> 
+        <input type="text" id="companyName" name="companyName"><br><br>
 
         <label for="phone">Phone:</label><br>
         <input type="tel" id="phone" name="phone" required><br><br>
@@ -20,36 +20,36 @@
         <input type="email" id="email" name="email" required><br><br>
 
         <label for="street">Street:</label><br>
-        <input type="text" id="street" name="street" ><br><br>
+        <input type="text" id="street" name="street" required><br><br>
 
         <label for="number">Number:</label><br>
-        <input type="text" id="number" name="number" ><br><br>
+        <input type="text" id="number" name="number" required><br><br>
 
         <label for="city">City:</label><br>
-        <input type="text" id="city" name="city" ><br><br>
+        <input type="text" id="city" name="city" required><br><br>
 
         <label for="postalCode">Postal Code:</label><br>
-        <input type="text" id="postalCode" name="postalCode" ><br><br>
+        <input type="text" id="postalCode" name="postalCode" required><br><br>
 
         <label for="county">County:</label><br>
-        <input type="text" id="county" name="county" ><br><br>
+        <input type="text" id="county" name="county" required><br><br>
 
         <label for="country">Country:</label><br>
-        <input type="text" id="country" name="country" ><br><br>
+        <input type="text" id="country" name="country" required><br><br>
 
-        <label for="url">URL:</label>
-        <input type="url" id="url" name="url" ><br><br>
-    
-         <label for="social1">Social You Tube:</label>
-         <input type="url" id="social1" name="social1"><br><br>
+        <label for="url">URL:</label><br>
+        <input type="url" id="url" name="url" required><br><br>
 
-        <label for="social2">Social LinkedIn:</label>
-       <input type="url" id="social2" name="social2"><br><br>
+        <label for="social1">Social You Tube:</label><br>
+        <input type="url" id="social1" name="social1"><br><br>
 
-       <label for="social3">Social Instagram:</label>
-       <input type="url" id="social3" name="social3"><br><br>
+        <label for="social2">Social LinkedIn</label><br>
+        <input type="url" id="social2" name="social2"><br><br>
 
-       <label for="social4">Social Facebook:</label>
+        <label for="social3">Social Instagram:</label><br>
+        <input type="url" id="social3" name="social3"><br><br>
+
+        <label for="social4">Social Facebook:</label>
        <input type="url" id="social4" name="social4"><br><br>
 
        <label for="social5">Social X:</label>
@@ -57,36 +57,33 @@
 
        <label for="social6">Social GitHub:</label>
        <input type="url" id="social6" name="social6"><br><br>
-    
+
         <input type="hidden" id="data" name="data">
-       <button type="submit">Generate QR Code</button>
+
+        <button type="button" id="generate-image">Generate QR Code</button>
+        <button type="button" id="download-vcard" style="display: none;">Download vCard</button>
     </form>
 
     <div id="qr-code-result"></div>
 
     <script>
-       const form = document.getElementById('qr-code-form');
-      const resultDiv = document.getElementById('qr-code-result');
-       form.addEventListener('submit', async (event) => {
-            event.preventDefault();
+        const form = document.getElementById('qr-code-form');
+        const resultDiv = document.getElementById('qr-code-result');
+        const generateImageButton = document.getElementById('generate-image');
+        const downloadVcardButton = document.getElementById('download-vcard');
+        const dataInput = document.getElementById('data'); // inputul ascuns
 
-             // Creează string-ul vCard
-            let contactData = "BEGIN:VCARD\r\nVERSION:3.0\r\n";
-            contactData += "N:" + form.lastName.value + ";" + form.firstName.value + ";;\r\n";
-            contactData += "ORG:" + form.companyName.value + "\r\n"; // Adaugă câmpul ORG
-            contactData += "Company:" + form.email.value + "\r\n";
-            contactData += "TEL;TYPE=CELL:" + form.phone.value + "\r\n";
-            contactData += "EMAIL:" + form.email.value + "\r\n";
-            contactData += "ADR;TYPE=WORK:" 
-              + form.street.value + ";" // Stradă
-              + form.number.value + ";" // Număr
-              + form.city.value + ";"    // Oraș
-              + form.postalCode.value + ";" // Cod poștal
-              + form.county.value + ";"   // Județ/Regiune
-              + form.country.value       // Țară
-              + "\r\n"
-            contactData += "URL:" + form.url.value + "\r\n";
-            if (form.social1.value !== '') {
+
+        // Funcție pentru generarea string-ului vCard (la fel ca înainte)
+        function generateVcardData() {
+        let contactData = "BEGIN:VCARD\r\nVERSION:3.0\r\n";
+        contactData += "N:" + form.lastName.value + ";" + form.firstName.value + ";;\r\n";
+        contactData += "ORG:" + form.companyName.value + "\r\n";
+        contactData += "TEL;TYPE=CELL:" + form.phone.value + "\r\n";
+        contactData += "EMAIL:" + form.email.value + "\r\n";
+        contactData += "ADR;TYPE=WORK:" + form.street.value + ";" + form.number.value + ";" + form.city.value + ";" + form.postalCode.value + ";" + form.county.value + ";" + form.country.value + "\r\n";
+        contactData += "URL:" + form.url.value + "\r\n";
+        if (form.social1.value !== '') {
               contactData += "X-SOCIALPROFILE;TYPE=Youtube:" + form.social1.value + "\r\n";
             }
             if (form.social2.value !== '') {
@@ -104,15 +101,76 @@
             if (form.social6.value !== '') {
               contactData += "X-SOCIALPROFILE;TYPE=GitHub:" + form.social6.value + "\r\n";
             }
-            /*contactData += "NOTE:Youtube: " + form.social1.value + "\\nLinkedIn: " + form.social2.value + "\\nInstagram: " + form.social3.value + "\r\n";*/
-            contactData += "END:VCARD";
+        contactData += "END:VCARD";
+        return contactData;
+        }
 
-            // Setează data în input-ul ascuns
-            document.getElementById('data').value = contactData;
-          form.submit();
-          console.log(contactData);
-          wait(2000);
 
+         generateImageButton.addEventListener('click',  () => {
+
+            // Generează datele vCard
+            const contactData = generateVcardData();
+             dataInput.value = contactData; // setează datele în câmpul ascuns
+
+            // Setează acțiunea formularului pentru generarea imaginii
+             form.action = "{{ path('app_qr_code_generate_image') }}";
+
+            // Trimite formularul
+           form.submit();
         });
+
+        downloadVcardButton.addEventListener('click',  () => {
+
+            // Generează datele vCard
+            const contactData = generateVcardData();
+            dataInput.value = contactData; // setează datele în câmpul ascuns
+            // Setează acțiunea formularului pentru descărcarea vCard
+             form.action = "{{ path('app_qr_code_generate_vcard') }}";
+
+            // Trimite formularul
+           form.submit();
+        });
+
+
+
+
+        // Adaugă un event listener pentru afișarea imaginii QR code
+        form.addEventListener('submit', async (event) => {
+            if (event.submitter && event.submitter.id === 'generate-image') { // Verifică dacă butonul "Generate Image" a fost apăsat
+               event.preventDefault();
+
+
+                const contactData = generateVcardData();
+                const generateImageUrl = "{{ path('app_qr_code_generate_image') }}";
+
+                 const formData = new FormData(form);
+                 formData.set("data", contactData)
+
+
+                 try {
+                     const response = await fetch(generateImageUrl, {
+                        method: 'POST',
+                       body: formData
+
+                     });
+
+                 const blob = await response.blob();
+                    const imageUrl = URL.createObjectURL(blob);
+
+                    resultDiv.innerHTML = `<img src="${imageUrl}" alt="QR Code">`;
+
+                     // Afișează butonul de descărcare
+                    downloadVcardButton.style.display = 'block';
+
+                } catch (error) {
+                    console.error('Error generating QR code:', error);
+                     resultDiv.innerHTML = '<p>Error generating QR code.</p>';
+                }
+
+            }
+        });
+
+
+
     </script>
 {% endblock %}
